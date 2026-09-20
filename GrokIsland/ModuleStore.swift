@@ -51,7 +51,12 @@ final class ModuleStore: ObservableObject {
             updatedAt: now
         )
         modules.append(module)
-        try persist()
+        do {
+            try persist()
+        } catch {
+            modules.removeAll { $0.id == module.id }
+            throw error
+        }
         return module
     }
 
@@ -66,8 +71,14 @@ final class ModuleStore: ObservableObject {
         next.name = trimmed
         next.prompt = module.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         next.updatedAt = Date()
+        let previous = modules[index]
         modules[index] = next
-        try persist()
+        do {
+            try persist()
+        } catch {
+            modules[index] = previous
+            throw error
+        }
         return next
     }
 
@@ -82,14 +93,26 @@ final class ModuleStore: ObservableObject {
         guard modules.contains(where: { $0.id == id }) else {
             throw IslandError.moduleNotFound
         }
+        let previous = modules
         modules.removeAll { $0.id == id }
-        try persist()
+        do {
+            try persist()
+        } catch {
+            modules = previous
+            throw error
+        }
     }
 
     /// Replaces the store with the provided modules and writes to disk.
     func replaceAll(_ modules: [FunctionModule]) throws {
+        let previous = self.modules
         self.modules = modules
-        try persist()
+        do {
+            try persist()
+        } catch {
+            self.modules = previous
+            throw error
+        }
     }
 
     func reload() {
