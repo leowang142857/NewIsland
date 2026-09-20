@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 /// TODO(frontend): Replace this entire view with the island UI the user will co-design.
 struct ShellView: View {
     @ObservedObject var engine: IslandEngine
+    @ObservedObject var presence: IslandPresence
 
     @State private var draftName = ""
     @State private var draftPrompt = ""
@@ -45,6 +46,12 @@ struct ShellView: View {
                 .stroke(dropTargeted ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: dropTargeted ? 2 : 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onHover { hovering in
+            presence.isHoveringPanel = hovering
+        }
+        .onChange(of: dropTargeted) { _, targeted in
+            presence.isDropTargeted = targeted
+        }
         .onDrop(of: [UTType.fileURL, UTType.url, UTType.plainText], isTargeted: $dropTargeted) { providers in
             engine.ingestDropProviders(providers)
             return true
@@ -56,7 +63,7 @@ struct ShellView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("grok岛")
                     .font(.headline)
-                Text("Functional shell — backend first")
+                Text("鼠标靠近显示 · 移开上提")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -68,6 +75,9 @@ struct ShellView: View {
             Text("天气 —")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Button(presence.isPinned ? "取消钉住" : "钉住") {
+                presence.isPinned.toggle()
+            }
             Button("Demo") {
                 engine.loadDemoModules(overwrite: engine.modules.isEmpty)
             }

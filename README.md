@@ -4,7 +4,9 @@ Native macOS app (SwiftUI + AppKit). A top-of-screen panel that accepts dropped 
 
 Modules are persistent skills you define (e.g. 翻译, 整理笔记, 跑脚本) — not auto-split task chunks.
 
-The window is a **minimal functional shell** so the backend can be exercised. Island chrome, glass, and animations are intentionally not built (`TODO(frontend)`).
+The window is a **minimal functional shell** so the backend can be exercised. Island chrome and glass are intentionally not built (`TODO(frontend)`).
+
+The panel stays docked at the top center (not freely draggable). **Mouse near the top-center strip shows it; moving away auto-retracts** to a thin `grok岛` tab. Pin it from the header if you want it to stay open. Uses `NSEvent.mouseLocation` (no Accessibility permission).
 
 ---
 
@@ -43,6 +45,8 @@ xcodebuild -scheme GrokIsland -configuration Debug -destination 'platform=macOS'
 ```bash
 swift test
 ```
+
+**面板：** 默认上提成细条；鼠标移到屏幕顶中附近会滑下来。移开约 0.5 秒后自动上提。确认 Local 运行或点「钉住」时不会收起。
 
 **试用后端：**
 
