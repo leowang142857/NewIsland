@@ -137,6 +137,23 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
             self?.inbox.ingest(items)
         }
     }
+
+    /// Drop straight onto a module tile: resolve the providers, then run that module on them.
+    func ingestDropProviders(_ providers: [NSItemProvider], assignTo moduleID: UUID) {
+        Task { [weak self] in
+            guard let self else { return }
+            let items = await ResourceIntake.loadItems(from: providers)
+            guard !items.isEmpty else {
+                self.lastError = IslandError.inboxEmpty.localizedDescription
+                return
+            }
+            do {
+                try self.runModule(id: moduleID, resources: items)
+            } catch {
+                self.reportError(error)
+            }
+        }
+    }
 #endif
 
     func removeInboxItem(id: UUID) {

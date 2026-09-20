@@ -8,6 +8,8 @@ The window is a **minimal functional shell** so the backend can be exercised. Is
 
 The panel stays docked at the top center (not freely draggable). **Mouse near the top-center strip shows it; moving away auto-retracts** to a thin `grok岛` tab. Pin it from the header if you want it to stay open. Uses `NSEvent.mouseLocation` (no Accessibility permission).
 
+Default view is a grid of module tiles plus a **新建模块** button. Click a tile to edit it; **drop resources onto a tile** to run that module on them.
+
 ---
 
 ## 打开 / 构建 / 运行（中文）
@@ -50,10 +52,10 @@ swift test
 
 **试用后端：**
 
-- 点 **Create module** 建一个模块（名称 + 提示词 + Grok Bot / Local）。空列表文案：创建你的第一个功能模块。
-- 或点 **Demo** 载入三个演示模块（仅当列表为空）。
-- 把文件 / 文件夹 / 链接拖进面板。
-- 选中模块，点 **Run selected module**（`IslandEngine.assignInbox(to:)`：把 inbox 指派给该模块）。
+- 点 **新建模块** 建一个模块（名称 + 提示词 + Grok Bot / Local）。空列表文案：创建你的第一个功能模块。
+- 或点 **载入示例** 载入三个演示模块（仅当列表为空）。
+- 点方块进入编辑 / 删除。
+- 把文件 / 文件夹 / 链接**拖到某个模块方块上**，即用该模块执行（`IslandEngine.ingestDropProviders(_:assignTo:)`）。
 - Local 模块会先确认：提示词不会当 shell；只有确认框里填写的命令才会执行。
 - Grok Bot 目前是演示桩（进度 + 假结果），没有 API key。
 

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -73,7 +74,8 @@ final class IslandPresence: ObservableObject {
 @MainActor
 final class IslandPanelController {
     static let peekSize = CGSize(width: 196, height: 22)
-    static let shellSize = CGSize(width: 520, height: 620)
+    /// Quarter of the old 520x620 shell.
+    static let shellSize = CGSize(width: 260, height: 310)
     static let retractDelay: TimeInterval = 0.55
     static let pollInterval: TimeInterval = 0.08
 
@@ -266,10 +268,9 @@ struct PeekStripView: View {
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
-        .onDrop(of: [UTType.fileURL, UTType.url, UTType.plainText], isTargeted: dropBinding) { providers in
-            engine.ingestDropProviders(providers)
-            presence.isRevealed = true
-            return true
+        // Dragging over the strip only reveals the shell; resources are dropped onto a module tile.
+        .onDrop(of: [UTType.fileURL, UTType.url, UTType.plainText], isTargeted: dropBinding) { _ in
+            false
         }
     }
 
