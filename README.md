@@ -10,7 +10,21 @@ The window is a **minimal functional shell** so the backend can be exercised. Is
 
 ## 打开 / 构建 / 运行（中文）
 
-1. 在 Mac 上安装 Xcode 15+（macOS 14+）。
+这是云端新建的项目：代码在 Agent 仓库里，**不会自动出现在你电脑上的旧文件夹**。本地要先有完整仓库：
+
+1. 在本 Agent 页面点 **Create repo**，创建一个 GitHub / Origin 仓库。
+2. 在 Mac 上 clone **那个新仓库**（不要打开你之前的空目录）。
+3. 根目录应同时有 `GrokIsland/`（源码）和 `GrokIsland.xcodeproj`（Xcode 工程包）。Finder 里 `.xcodeproj` 显示成一个文件，不是文件夹。
+
+只有源码、没有工程文件时，在仓库根目录执行：
+
+```bash
+./scripts/bootstrap-xcodeproj.sh
+```
+
+然后：
+
+1. 安装 Xcode 15+（macOS 14+）。
 2. 打开工程：
 
 ```bash
@@ -46,6 +60,13 @@ swift test
 ---
 
 ## Open / build / run (English)
+
+This started as a cloud new-project session. Create a repo with the **Create repo** pill, clone **that** repo to your Mac, then open `GrokIsland.xcodeproj` at the repo root (Finder shows it as a single file). If you only have sources:
+
+```bash
+./scripts/bootstrap-xcodeproj.sh
+open GrokIsland.xcodeproj
+```
 
 1. Xcode 15+ on macOS 14+.
 2. `open GrokIsland.xcodeproj` or the `xcodebuild` command above.
