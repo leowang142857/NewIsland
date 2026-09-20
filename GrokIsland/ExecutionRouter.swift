@@ -26,6 +26,10 @@ final class ExecutionRouter: ObservableObject {
         }
     }
 
+    func isRunning(runID: UUID) -> Bool {
+        tasks[runID] != nil
+    }
+
     /// Starts a Grok Bot run immediately. Local runs must go through `confirmLocal`.
     func start(_ request: ExecutionRequest, runID: UUID) throws {
         switch request.module.executor {
@@ -38,10 +42,6 @@ final class ExecutionRouter: ObservableObject {
     }
 
     func confirmLocal(_ request: ExecutionRequest, runID: UUID) throws {
-        guard request.module.executor == .local else {
-            launch(request, runID: runID)
-            return
-        }
         guard request.local != nil else { throw IslandError.localConfirmationRequired }
         launch(request, runID: runID)
     }
@@ -57,26 +57,38 @@ final class ExecutionRouter: ObservableObject {
         journal.transition(id: runID, phase: .running, progress: 0.02, message: "Starting")
 
         let worker = executor(for: request.module.executor)
-        tasks[runID] = Task { @MainActor [journal] in
+        tasks[runID] = Task { [weak self] in
+            guard let self else { return }
             do {
                 let result = try await worker.run(request) { progress in
-                    Task { @MainActor in
-                        journal.apply(progress: progress, to: runID)
+                    await MainActor.run {
+                        self.journal.apply(progress: progress, to: runID)
                     }
                 }
-                if Task.isCancelled {
-                    journal.cancel(id: runID)
-                    return
+                await MainActor.run {
+                    if Task.isCancelled {
+                        self.journal.cancel(id: runID)
+                    } else {
+                        self.journal.succeed(id: runID, result: result)
+                    }
+                    self.tasks[runID] = nil
                 }
-                journal.succeed(id: runID, result: result)
             } catch is CancellationError {
-                journal.cancel(id: runID)
+                await MainActor.run {
+                    self.journal.cancel(id: runID)
+                    self.tasks[runID] = nil
+                }
             } catch let error as IslandError {
-                journal.fail(id: runID, message: error.localizedDescription)
+                await MainActor.run {
+                    self.journal.fail(id: runID, message: error.localizedDescription)
+                    self.tasks[runID] = nil
+                }
             } catch {
-                journal.fail(id: runID, message: error.localizedDescription)
+                await MainActor.run {
+                    self.journal.fail(id: runID, message: error.localizedDescription)
+                    self.tasks[runID] = nil
+                }
             }
-            tasks[runID] = nil
         }
     }
 }

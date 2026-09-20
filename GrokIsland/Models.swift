@@ -148,6 +148,7 @@ enum IslandError: Error, LocalizedError, Equatable {
     case runNotFound
     case localConfirmationRequired
     case cancelled
+    case persistenceFailed(String)
     case executorFailed(String)
 
     var errorDescription: String? {
@@ -166,6 +167,8 @@ enum IslandError: Error, LocalizedError, Equatable {
             return "Local executor requires an explicit confirmation."
         case .cancelled:
             return "Run was cancelled."
+        case .persistenceFailed(let message):
+            return "Could not save modules: \(message)"
         case .executorFailed(let message):
             return message
         }

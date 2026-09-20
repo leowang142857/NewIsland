@@ -2,6 +2,8 @@ import Foundation
 import Combine
 
 /// Persists user-created `FunctionModule`s as JSON in Application Support.
+///
+/// Public API: `create` / `update` / `rename` / `delete` / `module(id:)` / `replaceAll` / `reload`.
 @MainActor
 final class ModuleStore: ObservableObject {
     @Published private(set) var modules: [FunctionModule] = []
@@ -20,7 +22,7 @@ final class ModuleStore: ObservableObject {
         modules = loadFromDisk()
     }
 
-    var defaultFileURL: URL { fileURL }
+    var storageURL: URL { fileURL }
 
     static var defaultFileURL: URL {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -49,7 +51,7 @@ final class ModuleStore: ObservableObject {
             updatedAt: now
         )
         modules.append(module)
-        persist()
+        try persist()
         return module
     }
 
@@ -65,8 +67,15 @@ final class ModuleStore: ObservableObject {
         next.prompt = module.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         next.updatedAt = Date()
         modules[index] = next
-        persist()
+        try persist()
         return next
+    }
+
+    @discardableResult
+    func rename(id: UUID, to name: String) throws -> FunctionModule {
+        guard var module = module(id: id) else { throw IslandError.moduleNotFound }
+        module.name = name
+        return try update(module)
     }
 
     func delete(id: UUID) throws {
@@ -74,13 +83,13 @@ final class ModuleStore: ObservableObject {
             throw IslandError.moduleNotFound
         }
         modules.removeAll { $0.id == id }
-        persist()
+        try persist()
     }
 
     /// Replaces the store with the provided modules and writes to disk.
-    func replaceAll(_ modules: [FunctionModule]) {
+    func replaceAll(_ modules: [FunctionModule]) throws {
         self.modules = modules
-        persist()
+        try persist()
     }
 
     func reload() {
@@ -113,12 +122,18 @@ final class ModuleStore: ObservableObject {
         ]
     }
 
-    private func persist() {
+    private func persist() throws {
         do {
+            let folder = fileURL.deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: folder.path) {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            }
             let data = try encoder.encode(modules)
             try data.write(to: fileURL, options: [.atomic])
+        } catch let error as IslandError {
+            throw error
         } catch {
-            NSLog("GrokIsland ModuleStore: save failed: \(error.localizedDescription)")
+            throw IslandError.persistenceFailed(error.localizedDescription)
         }
     }
 

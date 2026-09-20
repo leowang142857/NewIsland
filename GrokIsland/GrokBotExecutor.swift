@@ -17,23 +17,55 @@ enum GrokBotTransport {
     }
 }
 
-/// Demo / scaffold executor. Simulates progress and returns a canned result.
-///
-/// TODO: POST `ExecutionRequest` JSON to `GrokBotTransport.localHTTPPlaceholder`
-/// TODO: or hand off via `GrokBotTransport.urlScheme` — do not add API keys in this target.
-struct GrokBotExecutor: ModuleExecuting {
-    var kind: ExecutorKind { .grokBot }
+/// JSON body to POST when a real client is wired. No tokens / API keys.
+struct GrokBotWireRequest: Codable, Equatable, Sendable {
+    var moduleId: UUID
+    var name: String
+    var prompt: String
+    var extraPrompt: String?
+    var resources: [GrokBotWireResource]
+}
 
-    /// When true, skip sleeps so tests / previews can finish immediately.
+struct GrokBotWireResource: Codable, Equatable, Sendable {
+    var kind: ResourceKind
+    var name: String
+    var location: String
+}
+
+extension ExecutionRequest {
+    func grokWirePayload() -> GrokBotWireRequest {
+        GrokBotWireRequest(
+            moduleId: module.id,
+            name: module.displayName,
+            prompt: module.prompt,
+            extraPrompt: extraPrompt,
+            resources: resources.map {
+                GrokBotWireResource(kind: $0.kind, name: $0.name, location: $0.location)
+            }
+        )
+    }
+}
+
+/// Swap this when wiring a real Grok backend. `GrokBotExecutor` only forwards here.
+protocol GrokBotClient: Sendable {
+    func execute(
+        _ request: ExecutionRequest,
+        progress: @escaping @Sendable (ExecutionProgress) async -> Void
+    ) async throws -> ExecutionResult
+}
+
+/// Demo client so the island is usable without a Grok backend.
+struct DemoGrokBotClient: GrokBotClient {
+    /// When true, skip sleeps so tests can finish immediately.
     var instant: Bool
 
     init(instant: Bool = false) {
         self.instant = instant
     }
 
-    func run(
+    func execute(
         _ request: ExecutionRequest,
-        progress: @escaping @Sendable (ExecutionProgress) -> Void
+        progress: @escaping @Sendable (ExecutionProgress) async -> Void
     ) async throws -> ExecutionResult {
         let steps: [(Double, String)] = [
             (0.15, "Queued for Grok Bot (stub)"),
@@ -44,7 +76,7 @@ struct GrokBotExecutor: ModuleExecuting {
 
         for (fraction, message) in steps {
             try Task.checkCancellation()
-            progress(ExecutionProgress(fraction: fraction, message: message))
+            await progress(ExecutionProgress(fraction: fraction, message: message))
             if !instant {
                 try await Task.sleep(for: .milliseconds(350))
             }
@@ -52,31 +84,64 @@ struct GrokBotExecutor: ModuleExecuting {
 
         let resourceList = request.resources.map(\.name).joined(separator: ", ")
         let extra = request.extraPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let wire = request.grokWirePayload()
 
-        // TODO: Replace this body with the real Grok response.
-        // Suggested payload (do not send secrets):
-        // {
-        //   "moduleId": "...",
-        //   "name": "...",
-        //   "prompt": "...",
-        //   "resources": [{ "kind", "name", "location" }],
-        //   "extraPrompt": "..."
-        // }
+        // TODO: Replace this body with the real Grok response (see HTTPGrokBotClient).
         let detail = [
             "executor: grokBot (stub)",
-            "module: \(request.module.displayName)",
-            "prompt: \(request.module.prompt)",
+            "module: \(wire.name)",
+            "prompt: \(wire.prompt)",
             "resources: \(resourceList.isEmpty ? "(none)" : resourceList)",
             extra.isEmpty ? nil : "extra: \(extra)",
             "transport: \(GrokBotTransport.localHTTPPlaceholder.absoluteString)",
-            "urlScheme: \(GrokBotTransport.urlSchemeURL(moduleID: request.module.id)?.absoluteString ?? GrokBotTransport.urlScheme)"
+            "urlScheme: \(GrokBotTransport.urlSchemeURL(moduleID: wire.moduleId)?.absoluteString ?? GrokBotTransport.urlScheme)"
         ]
         .compactMap { $0 }
         .joined(separator: "\n")
 
         return ExecutionResult(
-            summary: "Grok Bot demo finished for “\(request.module.displayName)”.",
+            summary: "Grok Bot demo finished for “\(wire.name)”.",
             detail: detail
         )
+    }
+}
+
+/// TODO: POST `request.grokWirePayload()` to `endpoint`. Do not add API keys in this target.
+struct HTTPGrokBotClient: GrokBotClient {
+    var endpoint: URL
+
+    init(endpoint: URL = GrokBotTransport.localHTTPPlaceholder) {
+        self.endpoint = endpoint
+    }
+
+    func execute(
+        _ request: ExecutionRequest,
+        progress: @escaping @Sendable (ExecutionProgress) async -> Void
+    ) async throws -> ExecutionResult {
+        await progress(ExecutionProgress(fraction: 0.1, message: "Grok HTTP client is not wired"))
+        throw IslandError.executorFailed(
+            "Grok HTTP client is not wired. POST \(endpoint.absoluteString) — no API keys in this target."
+        )
+    }
+}
+
+/// Facade executor. Default client is the demo stub; inject `HTTPGrokBotClient` later.
+struct GrokBotExecutor: ModuleExecuting {
+    var kind: ExecutorKind { .grokBot }
+    var client: any GrokBotClient
+
+    init(client: any GrokBotClient = DemoGrokBotClient()) {
+        self.client = client
+    }
+
+    init(instant: Bool) {
+        self.client = DemoGrokBotClient(instant: instant)
+    }
+
+    func run(
+        _ request: ExecutionRequest,
+        progress: @escaping @Sendable (ExecutionProgress) async -> Void
+    ) async throws -> ExecutionResult {
+        try await client.execute(request, progress: progress)
     }
 }

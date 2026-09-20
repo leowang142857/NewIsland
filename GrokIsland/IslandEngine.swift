@@ -5,16 +5,48 @@ import Combine
 import AppKit
 #endif
 
+/// Surface the thin UI should depend on. All methods hop through `IslandEngine`.
+@MainActor
+protocol IslandEngineAPI: AnyObject {
+    var modules: [FunctionModule] { get }
+    var inboxItems: [ResourceItem] { get }
+    var runs: [RunRecord] { get }
+    var pendingLocal: PendingLocalRun? { get }
+    var lastError: String? { get }
+    var activeRunCount: Int { get }
+
+    func createModule(name: String, prompt: String, executor: ExecutorKind) throws -> FunctionModule
+    func updateModule(_ module: FunctionModule) throws -> FunctionModule
+    func renameModule(id: UUID, to name: String) throws -> FunctionModule
+    func deleteModule(id: UUID) throws
+    func loadDemoModules(overwrite: Bool)
+
+    func ingest(_ items: [ResourceItem])
+    func ingestDroppedURLs(_ urls: [URL])
+    func ingestDroppedStrings(_ strings: [String])
+    func removeInboxItem(id: UUID)
+    func clearInbox()
+
+    func runModule(id: UUID, extraPrompt: String?, resources: [ResourceItem]?, clearInboxOnStart: Bool) throws -> RunRecord
+    func assignInbox(to moduleID: UUID, extraPrompt: String?, clearInboxOnStart: Bool) throws -> RunRecord
+    func confirmPendingLocal(openAttachedFiles: Bool, shellCommand: String) throws
+    func cancelPendingLocal()
+    func cancelRun(id: UUID)
+    func quickAskGrok(_ text: String) throws -> RunRecord
+    func clearFinishedRuns()
+}
+
 /// Public facade the UI should call. Owns module CRUD, the drop inbox, and execution.
 ///
-///     createModule / updateModule / deleteModule / loadDemoModules
+///     createModule / updateModule / renameModule / deleteModule / loadDemoModules
 ///     ingestDroppedURLs / ingestDroppedStrings / ingestDropProviders
 ///     removeInboxItem / clearInbox
-///     runModule / confirmPendingLocal / cancelPendingLocal / cancelRun
+///     assignInbox(to:) / runModule
+///     confirmPendingLocal / cancelPendingLocal / cancelRun
 ///     quickAskGrok
 ///     clearFinishedRuns
 @MainActor
-final class IslandEngine: ObservableObject {
+final class IslandEngine: ObservableObject, IslandEngineAPI {
     let moduleStore: ModuleStore
     let inbox: ResourceInbox
     let journal: RunJournal
@@ -59,6 +91,12 @@ final class IslandEngine: ObservableObject {
         return try moduleStore.update(module)
     }
 
+    @discardableResult
+    func renameModule(id: UUID, to name: String) throws -> FunctionModule {
+        lastError = nil
+        return try moduleStore.rename(id: id, to: name)
+    }
+
     func deleteModule(id: UUID) throws {
         lastError = nil
         if pendingLocal?.module.id == id {
@@ -69,8 +107,12 @@ final class IslandEngine: ObservableObject {
 
     func loadDemoModules(overwrite: Bool = false) {
         lastError = nil
-        if overwrite || moduleStore.modules.isEmpty {
-            moduleStore.replaceAll(ModuleStore.demoModules())
+        do {
+            if overwrite || moduleStore.modules.isEmpty {
+                try moduleStore.replaceAll(ModuleStore.demoModules())
+            }
+        } catch {
+            reportError(error)
         }
     }
 
@@ -107,8 +149,7 @@ final class IslandEngine: ObservableObject {
 
     // MARK: - Run
 
-    /// Assigns the current inbox to a user-defined module and starts it.
-    /// Local modules pause on `pendingLocal` until `confirmPendingLocal`.
+    /// Lower-level start. Empty resource lists are allowed (prompt-only modules).
     @discardableResult
     func runModule(
         id: UUID,
@@ -122,45 +163,28 @@ final class IslandEngine: ObservableObject {
             throw IslandError.moduleNotFound
         }
         let payload = resources ?? inbox.snapshot()
+        return try start(module: module, resources: payload, extraPrompt: extraPrompt, clearInboxOnStart: clearInboxOnStart)
+    }
 
-        switch module.executor {
-        case .local:
-            let record = journal.enqueue(
-                module: module,
-                name: module.displayName,
-                executor: .local,
-                resources: payload,
-                extraPrompt: extraPrompt,
-                phase: .awaitingConfirmation
-            )
-            pendingLocal = PendingLocalRun(
-                runID: record.id,
-                module: module,
-                resources: payload,
-                extraPrompt: extraPrompt
-            )
-            if clearInboxOnStart { inbox.clear() }
-            return record
-
-        case .grokBot:
-            let record = journal.enqueue(
-                module: module,
-                name: module.displayName,
-                executor: .grokBot,
-                resources: payload,
-                extraPrompt: extraPrompt,
-                phase: .queued
-            )
-            let request = ExecutionRequest(
-                module: module,
-                resources: payload,
-                extraPrompt: extraPrompt,
-                local: nil
-            )
-            try router.start(request, runID: record.id)
-            if clearInboxOnStart { inbox.clear() }
-            return record
+    /// Assigns the current inbox to a user-defined module and starts it.
+    /// Requires at least one dropped resource. Local modules pause on `pendingLocal`.
+    @discardableResult
+    func assignInbox(
+        to moduleID: UUID,
+        extraPrompt: String? = nil,
+        clearInboxOnStart: Bool = true
+    ) throws -> RunRecord {
+        lastError = nil
+        guard !inbox.isEmpty else {
+            lastError = IslandError.inboxEmpty.localizedDescription
+            throw IslandError.inboxEmpty
         }
+        return try runModule(
+            id: moduleID,
+            extraPrompt: extraPrompt,
+            resources: inbox.snapshot(),
+            clearInboxOnStart: clearInboxOnStart
+        )
     }
 
     func confirmPendingLocal(openAttachedFiles: Bool, shellCommand: String) throws {
@@ -207,17 +231,18 @@ final class IslandEngine: ObservableObject {
             prompt: prompt,
             executor: .grokBot
         )
+        let payload = inbox.snapshot()
         let record = journal.enqueue(
             module: ephemeral,
             name: ephemeral.name,
             executor: .grokBot,
-            resources: inbox.snapshot(),
+            resources: payload,
             extraPrompt: prompt,
             phase: .queued
         )
         let request = ExecutionRequest(
             module: ephemeral,
-            resources: inbox.snapshot(),
+            resources: payload,
             extraPrompt: prompt,
             local: nil
         )
@@ -231,6 +256,52 @@ final class IslandEngine: ObservableObject {
 
     func reportError(_ error: Error) {
         lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    private func start(
+        module: FunctionModule,
+        resources: [ResourceItem],
+        extraPrompt: String?,
+        clearInboxOnStart: Bool
+    ) throws -> RunRecord {
+        switch module.executor {
+        case .local:
+            let record = journal.enqueue(
+                module: module,
+                name: module.displayName,
+                executor: .local,
+                resources: resources,
+                extraPrompt: extraPrompt,
+                phase: .awaitingConfirmation
+            )
+            pendingLocal = PendingLocalRun(
+                runID: record.id,
+                module: module,
+                resources: resources,
+                extraPrompt: extraPrompt
+            )
+            if clearInboxOnStart { inbox.clear() }
+            return record
+
+        case .grokBot:
+            let record = journal.enqueue(
+                module: module,
+                name: module.displayName,
+                executor: .grokBot,
+                resources: resources,
+                extraPrompt: extraPrompt,
+                phase: .queued
+            )
+            let request = ExecutionRequest(
+                module: module,
+                resources: resources,
+                extraPrompt: extraPrompt,
+                local: nil
+            )
+            try router.start(request, runID: record.id)
+            if clearInboxOnStart { inbox.clear() }
+            return record
+        }
     }
 
     private func bindChildren() {

@@ -2,11 +2,14 @@ import Foundation
 import Combine
 
 /// Session inbox of dropped resource *references* (paths / URLs / bookmarks).
+///
+/// Public API: `ingest` / `remove(id:)` / `clear` / `snapshot`.
 @MainActor
 final class ResourceInbox: ObservableObject {
     @Published private(set) var items: [ResourceItem] = []
 
     var isEmpty: Bool { items.isEmpty }
+    var count: Int { items.count }
 
     func ingest(_ incoming: [ResourceItem]) {
         guard !incoming.isEmpty else { return }

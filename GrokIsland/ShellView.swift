@@ -132,7 +132,7 @@ struct ShellView: View {
                         }
                         .buttonStyle(.borderless)
                     }
-                    .tag(Optional(module.id))
+                        .tag(module.id)
                 }
                 .frame(minHeight: 120, maxHeight: 160)
             }
@@ -179,7 +179,7 @@ struct ShellView: View {
                     return
                 }
                 do {
-                    _ = try engine.runModule(id: id)
+                    _ = try engine.assignInbox(to: id)
                 } catch {
                     engine.reportError(error)
                 }

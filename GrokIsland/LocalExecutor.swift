@@ -11,36 +11,36 @@ struct LocalExecutor: ModuleExecuting {
 
     func run(
         _ request: ExecutionRequest,
-        progress: @escaping @Sendable (ExecutionProgress) -> Void
+        progress: @escaping @Sendable (ExecutionProgress) async -> Void
     ) async throws -> ExecutionResult {
         guard let options = request.local else {
             throw IslandError.localConfirmationRequired
         }
 
         try Task.checkCancellation()
-        progress(ExecutionProgress(fraction: 0.1, message: "Local run confirmed"))
+        await progress(ExecutionProgress(fraction: 0.1, message: "Local run confirmed"))
 
         var notes: [String] = []
 
         if options.openAttachedFiles {
             try Task.checkCancellation()
-            progress(ExecutionProgress(fraction: 0.35, message: "Opening attached files"))
+            await progress(ExecutionProgress(fraction: 0.35, message: "Opening attached files"))
             notes.append(await openFiles(in: request.resources))
         }
 
         if let command = sanitizedCommand(options.confirmedShellCommand) {
             try Task.checkCancellation()
-            progress(ExecutionProgress(fraction: 0.7, message: "Running confirmed command"))
+            await progress(ExecutionProgress(fraction: 0.7, message: "Running confirmed command"))
             notes.append(try await runConfirmedCommand(command))
         }
 
         if !options.hasWork {
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .milliseconds(50))
             notes.append("No-op: confirmation accepted, nothing to open or run.")
         }
 
         try Task.checkCancellation()
-        progress(ExecutionProgress(fraction: 1.0, message: "Local run finished"))
+        await progress(ExecutionProgress(fraction: 1.0, message: "Local run finished"))
         return ExecutionResult(
             summary: "Local module “\(request.module.displayName)” finished.",
             detail: notes.joined(separator: "\n")
@@ -76,36 +76,46 @@ struct LocalExecutor: ModuleExecuting {
 
     /// Only invoked with a command string the user typed and confirmed.
     private func runConfirmedCommand(_ command: String) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-lc", command]
-                let stdout = Pipe()
-                let stderr = Pipe()
-                process.standardOutput = stdout
-                process.standardError = stderr
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                    let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                    let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                    let out = String(data: outData, encoding: .utf8) ?? ""
-                    let err = String(data: errData, encoding: .utf8) ?? ""
-                    if process.terminationStatus == 0 {
-                        let body = out.trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(returning: body.isEmpty ? "Command exited 0." : body)
-                    } else {
-                        let message = err.trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(
-                            throwing: IslandError.executorFailed(
-                                message.isEmpty ? "Command exited \(process.terminationStatus)." : message
+        let process = Process()
+        let shell = FileManager.default.isExecutableFile(atPath: "/bin/zsh") ? "/bin/zsh" : "/bin/sh"
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-lc", command]
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try process.run()
+                        process.waitUntilExit()
+                        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+                        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+                        let out = String(data: outData, encoding: .utf8) ?? ""
+                        let err = String(data: errData, encoding: .utf8) ?? ""
+                        if process.terminationStatus == 0 {
+                            let body = out.trimmingCharacters(in: .whitespacesAndNewlines)
+                            continuation.resume(returning: body.isEmpty ? "Command exited 0." : body)
+                        } else if process.terminationReason == .uncaughtSignal {
+                            continuation.resume(throwing: CancellationError())
+                        } else {
+                            let message = err.trimmingCharacters(in: .whitespacesAndNewlines)
+                            continuation.resume(
+                                throwing: IslandError.executorFailed(
+                                    message.isEmpty ? "Command exited \(process.terminationStatus)." : message
+                                )
                             )
-                        )
+                        }
+                    } catch {
+                        continuation.resume(throwing: IslandError.executorFailed(error.localizedDescription))
                     }
-                } catch {
-                    continuation.resume(throwing: IslandError.executorFailed(error.localizedDescription))
                 }
+            }
+        } onCancel: {
+            if process.isRunning {
+                process.terminate()
             }
         }
     }

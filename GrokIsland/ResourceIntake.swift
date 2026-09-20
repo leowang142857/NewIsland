@@ -1,5 +1,8 @@
 import Foundation
+
+#if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
+#endif
 
 #if canImport(AppKit)
 import AppKit
@@ -39,24 +42,50 @@ enum ResourceIntake {
         } else {
             name = url.absoluteString
         }
-        return ResourceItem(kind: .url, name: name, location: url.absoluteString, uti: UTType.url.identifier)
+        return ResourceItem(
+            kind: .url,
+            name: name,
+            location: url.absoluteString,
+            uti: {
+                #if canImport(UniformTypeIdentifiers)
+                UTType.url.identifier
+                #else
+                "public.url"
+                #endif
+            }()
+        )
     }
 
     static func fileItem(at url: URL) -> ResourceItem {
         var isDirectory: ObjCBool = false
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+
+        #if canImport(UniformTypeIdentifiers)
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
+        let uti = values?.contentType?.identifier
+        let fileSize = values?.fileSize.map { Int64($0) }
+        #else
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        let uti: String? = nil
+        let fileSize = values?.fileSize.map { Int64($0) }
+        #endif
+
+        #if os(macOS)
         let bookmark = try? url.bookmarkData(
             options: [.minimalBookmark],
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
+        #else
+        let bookmark: Data? = nil
+        #endif
+
         return ResourceItem(
             kind: isDirectory.boolValue ? .folder : .file,
             name: url.lastPathComponent,
             location: url.path,
-            uti: values?.contentType?.identifier,
-            fileSize: values?.fileSize.map { Int64($0) },
+            uti: uti,
+            fileSize: fileSize,
             bookmarkData: bookmark
         )
     }
@@ -80,6 +109,7 @@ enum ResourceIntake {
                 return makeItem(from: url)
             }
         }
+        #if canImport(UniformTypeIdentifiers)
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             if let url = await loadTypedURL(from: provider, type: UTType.fileURL) {
                 return makeItem(from: url)
@@ -95,6 +125,7 @@ enum ResourceIntake {
                 return items(fromStrings: [text]).first
             }
         }
+        #endif
         return nil
     }
 

@@ -41,4 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // TODO: When Grok Bot is wired, map grok-island:// callbacks into IslandEngine.
+        let dropped = urls.filter { $0.scheme != GrokBotTransport.urlScheme }
+        if !dropped.isEmpty {
+            engine.ingestDroppedURLs(dropped)
+        }
+    }
 }

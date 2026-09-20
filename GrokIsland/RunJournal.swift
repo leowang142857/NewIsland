@@ -2,6 +2,10 @@ import Foundation
 import Combine
 
 /// In-memory notification / progress log for module runs.
+///
+/// State machine: `queued` → (`awaitingConfirmation` for Local) → `running`
+/// → `succeeded` | `failed` | `cancelled`.
+/// Terminal phases are sticky: later progress / success cannot resurrect a cancelled run.
 @MainActor
 final class RunJournal: ObservableObject {
     @Published private(set) var runs: [RunRecord] = []
@@ -21,11 +25,12 @@ final class RunJournal: ObservableObject {
         executor: ExecutorKind,
         resources: [ResourceItem],
         extraPrompt: String?,
-        phase: RunPhase = .queued
+        phase: RunPhase = .queued,
+        id: UUID = UUID()
     ) -> RunRecord {
         let now = Date()
         let record = RunRecord(
-            id: UUID(),
+            id: id,
             moduleID: module?.id,
             moduleName: name,
             executor: executor,
@@ -51,6 +56,7 @@ final class RunJournal: ObservableObject {
     ) {
         guard let index = runs.firstIndex(where: { $0.id == id }) else { return }
         var record = runs[index]
+        if record.phase.isTerminal { return }
         record.phase = phase
         if let progress {
             record.progress = min(max(progress, 0), 1)
@@ -66,6 +72,8 @@ final class RunJournal: ObservableObject {
     }
 
     func apply(progress: ExecutionProgress, to id: UUID) {
+        guard let record = record(id: id) else { return }
+        guard record.phase == .running || record.phase == .queued else { return }
         transition(id: id, phase: .running, progress: progress.fraction, message: progress.message)
     }
 
