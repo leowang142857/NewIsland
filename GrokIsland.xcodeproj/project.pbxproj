@@ -21,6 +21,7 @@
 		01C00000000000000000000C /* IslandEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000C /* IslandEngine.swift */; };
 		01C00000000000000000000D /* IslandPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000D /* IslandPanel.swift */; };
 		01C00000000000000000000E /* ShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000E /* ShellView.swift */; };
+		01C000000000000000000012 /* DesktopShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000012 /* DesktopShortcut.swift */; };
 		01C000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000011 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -40,6 +41,7 @@
 		01B00000000000000000000C /* IslandEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandEngine.swift; sourceTree = "<group>"; };
 		01B00000000000000000000D /* IslandPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandPanel.swift; sourceTree = "<group>"; };
 		01B00000000000000000000E /* ShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellView.swift; sourceTree = "<group>"; };
+		01B000000000000000000012 /* DesktopShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopShortcut.swift; sourceTree = "<group>"; };
 		01B00000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		01B000000000000000000010 /* GrokIsland.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GrokIsland.entitlements; sourceTree = "<group>"; };
 		01B000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -88,6 +90,7 @@
 				01B000000000000000000001 /* GrokIslandApp.swift */,
 				01B00000000000000000000D /* IslandPanel.swift */,
 				01B00000000000000000000E /* ShellView.swift */,
+				01B000000000000000000012 /* DesktopShortcut.swift */,
 				01A000000000000000000020 /* Core */,
 				01B00000000000000000000F /* Info.plist */,
 				01B000000000000000000010 /* GrokIsland.entitlements */,
@@ -188,6 +191,7 @@
 				01C00000000000000000000C /* IslandEngine.swift in Sources */,
 				01C00000000000000000000D /* IslandPanel.swift in Sources */,
 				01C00000000000000000000E /* ShellView.swift in Sources */,
+				01C000000000000000000012 /* DesktopShortcut.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

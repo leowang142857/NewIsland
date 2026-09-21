@@ -6,7 +6,9 @@ Modules are persistent skills you define (e.g. 翻译, 整理笔记, 跑脚本) 
 
 The window is a **minimal functional shell** so the backend can be exercised. Island chrome and glass are intentionally not built (`TODO(frontend)`).
 
-The panel stays docked at the top center (not freely draggable). **Mouse near the top-center strip shows it; moving away auto-retracts** to a thin `grok岛` tab. Pin it from the header if you want it to stay open. Uses `NSEvent.mouseLocation` (no Accessibility permission).
+The panel stays docked at the top center (not freely draggable). **Only hovering the collapsed peek strip** shows it; moving away auto-retracts. Pin it from the header if you want it to stay open. Uses `NSEvent.mouseLocation` (no Accessibility permission).
+
+To put a launcher on the Desktop: click the header shortcut button, or run `./scripts/make-desktop-shortcut.sh` on a Mac. That copies the app to `~/Applications/grok岛.app` and creates a Finder alias `~/Desktop/grok岛`.
 
 Default view is a grid of module tiles plus a **新建模块** button. Click a tile to edit it; **drop resources onto a tile** to run that module on them.
 
@@ -48,7 +50,9 @@ xcodebuild -scheme GrokIsland -configuration Debug -destination 'platform=macOS'
 swift test
 ```
 
-**面板：** 默认上提成细条；鼠标移到屏幕顶中附近会滑下来。移开约 0.5 秒后自动上提。确认 Local 运行或点「钉住」时不会收起。
+**面板：** 默认上提成细条；只有鼠标碰到这条细边框才会滑下来。移开约 0.5 秒后自动上提。确认 Local 运行或点「钉住」时不会收起。
+
+**桌面快捷方式：** 展开后面板标题栏的方块箭头按钮，或在仓库根目录执行 `./scripts/make-desktop-shortcut.sh`。桌面会出现「grok岛」。
 
 **试用后端：**
 

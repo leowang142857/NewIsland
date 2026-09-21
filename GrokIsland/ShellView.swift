@@ -19,6 +19,7 @@ struct ShellView: View {
     @State private var draftExecutor: ExecutorKind = .grokBot
     @State private var confirmOpenFiles = true
     @State private var confirmCommand = ""
+    @State private var shortcutNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -91,6 +92,16 @@ struct ShellView: View {
             }
             .buttonStyle(.borderless)
             .help(presence.isPinned ? "取消钉住" : "钉住，不自动收起")
+            Button(action: installDesktopShortcut) {
+                Image(systemName: "menubar.arrow.up.rectangle")
+            }
+            .buttonStyle(.borderless)
+            .help("在桌面创建快捷方式")
+        }
+        if let shortcutNote {
+            Text(shortcutNote)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -300,6 +311,16 @@ struct ShellView: View {
         draftPrompt = module.prompt
         draftExecutor = module.executor
         route = .editor(module.id)
+    }
+
+    private func installDesktopShortcut() {
+        do {
+            _ = try DesktopShortcut.install()
+            shortcutNote = "已放到桌面：grok岛"
+        } catch {
+            shortcutNote = error.localizedDescription
+            engine.reportError(error)
+        }
     }
 
     private func saveDraft(editingID: UUID?) {

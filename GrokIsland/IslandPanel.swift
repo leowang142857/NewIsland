@@ -208,19 +208,13 @@ final class IslandPanelController {
         ).contains(mouse)
     }
 
+    /// Retracted: only the peek strip itself. Revealed: the panel, with a tiny
+    /// edge so moving onto a button at the border does not instantly hide it.
     static func hotZone(revealed: Bool, panelFrame: NSRect, screen: NSScreen) -> NSRect {
         if revealed {
-            return panelFrame.insetBy(dx: -36, dy: -36)
+            return panelFrame.insetBy(dx: -4, dy: -4)
         }
-        let width: CGFloat = 440
-        let height: CGFloat = 72
-        let top = ScreenAnchor.topY(on: screen)
-        return NSRect(
-            x: screen.frame.midX - width / 2,
-            y: top - height,
-            width: width,
-            height: height
-        )
+        return panelFrame
     }
 }
 

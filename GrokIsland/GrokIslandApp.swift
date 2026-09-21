@@ -15,6 +15,9 @@ struct GrokIslandApp: App {
                 Text("Modules are stored in Application Support/GrokIsland/function-modules.json")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("在桌面创建快捷方式") {
+                    _ = try? DesktopShortcut.install()
+                }
             }
             .padding(20)
             .frame(minWidth: 360)
