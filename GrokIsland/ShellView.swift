@@ -1,8 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Minimal functional shell so the backend can be exercised.
-/// TODO(frontend): Replace this entire view with the island UI the user will co-design.
+/// Functional shell on the dark cyber glass. Calls `IslandEngine` only.
 struct ShellView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
@@ -45,12 +44,10 @@ struct ShellView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .islandChrome(
+            RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
+            rainVeil: 0.32
+        )
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
@@ -382,11 +379,17 @@ struct ModuleTile: View {
             .padding(7)
             .frame(height: 78)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(targeted ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.10))
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(targeted ? IslandChrome.neonCyan.opacity(0.16) : Color.white.opacity(0.05))
+            )
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(targeted ? Color.accentColor : Color.secondary.opacity(0.28), lineWidth: targeted ? 2 : 1)
+                    .stroke(
+                        targeted ? IslandChrome.neonCyan : IslandChrome.neonCyan.opacity(0.28),
+                        lineWidth: targeted ? 1.5 : 1
+                    )
             }
         }
         .buttonStyle(.plain)

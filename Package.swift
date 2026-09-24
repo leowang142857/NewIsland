@@ -17,6 +17,7 @@ let package = Package(
                 "GrokIslandApp.swift",
                 "IslandPanel.swift",
                 "ShellView.swift",
+                "CyberCodeRain.swift",
                 "DesktopShortcut.swift",
                 "Info.plist",
                 "GrokIsland.entitlements",
