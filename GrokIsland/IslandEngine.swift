@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#else
+import OpenCombine
+#endif
 
 #if canImport(AppKit)
 import AppKit

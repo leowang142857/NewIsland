@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#else
+import OpenCombine
+#endif
 
 /// Picks Grok Bot vs Local and drives `RunJournal` through the run state machine.
 @MainActor

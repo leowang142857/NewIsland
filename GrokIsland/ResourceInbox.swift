@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#else
+import OpenCombine
+#endif
 
 /// Session inbox of dropped resource *references* (paths / URLs / bookmarks).
 ///
