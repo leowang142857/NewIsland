@@ -54,51 +54,53 @@ struct ShellView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            if case .modules = route {
-                Text("grok岛")
-                    .font(.subheadline.weight(.semibold))
-            } else {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                if case .modules = route {
+                    Text("grok岛")
+                        .font(.subheadline.weight(.semibold))
+                } else {
+                    Button {
+                        route = .modules
+                    } label: {
+                        Label("返回", systemImage: "chevron.left")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    Text(routeTitle)
+                        .font(.subheadline.weight(.semibold))
+                }
+
+                Spacer()
+
+                if engine.activeRunCount > 0 {
+                    Button("\(engine.activeRunCount) 运行中") { route = .runs }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                }
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(context.date, style: .time)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 Button {
-                    route = .modules
+                    presence.isPinned.toggle()
                 } label: {
-                    Label("返回", systemImage: "chevron.left")
-                        .labelStyle(.iconOnly)
+                    Image(systemName: presence.isPinned ? "pin.fill" : "pin")
                 }
                 .buttonStyle(.borderless)
-                Text(routeTitle)
-                    .font(.subheadline.weight(.semibold))
+                .help(presence.isPinned ? "取消钉住" : "钉住，不自动收起")
+                Button(action: installDesktopShortcut) {
+                    Image(systemName: "menubar.arrow.up.rectangle")
+                }
+                .buttonStyle(.borderless)
+                .help("在桌面创建快捷方式")
             }
-
-            Spacer()
-
-            if engine.activeRunCount > 0 {
-                Button("\(engine.activeRunCount) 运行中") { route = .runs }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-            }
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(context.date, style: .time)
-                    .font(.caption.monospacedDigit())
+            if let shortcutNote {
+                Text(shortcutNote)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Button {
-                presence.isPinned.toggle()
-            } label: {
-                Image(systemName: presence.isPinned ? "pin.fill" : "pin")
-            }
-            .buttonStyle(.borderless)
-            .help(presence.isPinned ? "取消钉住" : "钉住，不自动收起")
-            Button(action: installDesktopShortcut) {
-                Image(systemName: "menubar.arrow.up.rectangle")
-            }
-            .buttonStyle(.borderless)
-            .help("在桌面创建快捷方式")
-        }
-        if let shortcutNote {
-            Text(shortcutNote)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 
