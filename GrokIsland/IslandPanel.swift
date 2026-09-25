@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 
 /// Borderless always-on-top panel, pinned to the top center of the preferred screen.
 ///
-/// TODO(frontend): Replace this functional host with the Dynamic Island chrome
-/// and glass treatment. Proximity show / auto-retract is already wired here.
+/// Chrome (dark glass, neon edge, code rain) lives in the SwiftUI root.
+/// Proximity show / auto-retract is wired here.
 final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -94,6 +94,7 @@ final class IslandPanelController {
         let root = IslandRootView(engine: engine, presence: presence)
         let host = FirstMouseHostingView(rootView: root)
         host.wantsLayer = true
+        host.appearance = NSAppearance(named: .darkAqua)
         host.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = host
 
@@ -185,9 +186,12 @@ final class IslandPanelController {
         let next = ScreenAnchor.topCenterFrame(size: size, on: screen)
         guard panel.frame != next else { return }
         if animated {
+            // Soft settle, matched to `IslandChrome.expandSpring` on the SwiftUI scale.
+            // Control points stay inside 0...1 so the top-pinned frame does not overshoot offscreen.
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.duration = 0.42
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.22, 1.0)
+                context.allowsImplicitAnimation = true
                 panel.animator().setFrame(next, display: true)
             }
         } else {
@@ -223,14 +227,19 @@ struct IslandRootView: View {
     @ObservedObject var presence: IslandPresence
 
     var body: some View {
-        Group {
+        ZStack {
             if presence.isRevealed {
                 ShellView(engine: engine, presence: presence)
+                    .transition(IslandChrome.revealTransition)
             } else {
                 PeekStripView(engine: engine, presence: presence)
+                    .transition(IslandChrome.revealTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(IslandChrome.expandSpring, value: presence.isRevealed)
+        .preferredColorScheme(.dark)
+        .tint(IslandChrome.neonCyan)
     }
 }
 
@@ -242,7 +251,7 @@ struct PeekStripView: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(engine.activeRunCount > 0 ? Color.accentColor : Color.secondary)
+                .fill(engine.activeRunCount > 0 ? IslandChrome.electricGreen : Color.secondary)
                 .frame(width: 6, height: 6)
             Text("grok岛")
                 .font(.caption.weight(.semibold))
@@ -253,12 +262,7 @@ struct PeekStripView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .stroke(presence.isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.4), lineWidth: 1)
-        }
+        .islandChrome(Capsule(), rainVeil: 0.22, emphasized: presence.isDropTargeted)
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
