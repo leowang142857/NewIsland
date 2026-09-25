@@ -14,7 +14,7 @@ final class ModuleStoreTests: XCTestCase {
         return ModuleStore(fileURL: folder.appendingPathComponent("function-modules.json"))
     }
 
-    func testCRUDAndPersistence() throws {
+    func testCRUDAndPersistence() async throws {
         let store = try makeStore()
         XCTAssertTrue(store.modules.isEmpty)
 
@@ -44,14 +44,14 @@ final class ModuleStoreTests: XCTestCase {
         XCTAssertTrue(emptyReload.modules.isEmpty)
     }
 
-    func testRejectsEmptyName() {
+    func testRejectsEmptyName() async {
         let store = try! makeStore()
         XCTAssertThrowsError(try store.create(name: "   ", prompt: "x", executor: .grokBot)) { error in
             XCTAssertEqual(error as? IslandError, .moduleNameEmpty)
         }
     }
 
-    func testDeleteMissingThrows() {
+    func testDeleteMissingThrows() async {
         let store = try! makeStore()
         XCTAssertThrowsError(try store.delete(id: UUID())) { error in
             XCTAssertEqual(error as? IslandError, .moduleNotFound)
@@ -61,7 +61,7 @@ final class ModuleStoreTests: XCTestCase {
 
 @MainActor
 final class ResourceInboxTests: XCTestCase {
-    func testIngestDedupesByLocation() {
+    func testIngestDedupesByLocation() async {
         let inbox = ResourceInbox()
         let a = ResourceItem(kind: .file, name: "a.txt", location: "/tmp/a.txt")
         let b = ResourceItem(kind: .file, name: "a-copy", location: "/tmp/a.txt")
@@ -100,7 +100,7 @@ final class ResourceIntakeTests: XCTestCase {
 
 @MainActor
 final class RunJournalTests: XCTestCase {
-    func testStateMachineAndStickyTerminal() {
+    func testStateMachineAndStickyTerminal() async {
         let journal = RunJournal()
         let module = FunctionModule(name: "翻译", prompt: "zh", executor: .grokBot)
         let record = journal.enqueue(
@@ -137,7 +137,7 @@ final class IslandEngineTests: XCTestCase {
         )
     }
 
-    func testAssignInboxRequiresResources() throws {
+    func testAssignInboxRequiresResources() async throws {
         let engine = try makeEngine()
         let module = try engine.createModule(name: "翻译", prompt: "zh", executor: .grokBot)
         XCTAssertThrowsError(try engine.assignInbox(to: module.id)) { error in
@@ -172,7 +172,7 @@ final class IslandEngineTests: XCTestCase {
         }
     }
 
-    func testCancelPendingLocal() throws {
+    func testCancelPendingLocal() async throws {
         let engine = try makeEngine()
         let module = try engine.createModule(name: "打开文件", prompt: "open", executor: .local)
         engine.ingestDroppedStrings(["https://example.com"])
@@ -182,14 +182,14 @@ final class IslandEngineTests: XCTestCase {
         XCTAssertEqual(engine.journal.record(id: record.id)?.phase, .cancelled)
     }
 
-    func testQuickAskRejectsEmpty() throws {
+    func testQuickAskRejectsEmpty() async throws {
         let engine = try makeEngine()
         XCTAssertThrowsError(try engine.quickAskGrok("   ")) { error in
             XCTAssertEqual(error as? IslandError, .emptyInput)
         }
     }
 
-    func testRenameAndDelete() throws {
+    func testRenameAndDelete() async throws {
         let engine = try makeEngine()
         let module = try engine.createModule(name: "A", prompt: "", executor: .grokBot)
         _ = try engine.renameModule(id: module.id, to: "B")

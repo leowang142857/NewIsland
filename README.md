@@ -86,6 +86,27 @@ open GrokIsland.xcodeproj
 
 ---
 
+## Linux / Cloud Agent (headless core)
+
+The SwiftUI + AppKit app only builds on macOS with Xcode, but the `GrokIslandCore`
+package (module CRUD, drop intake, run state machine, executors) is
+platform-agnostic and its XCTest suite runs on Linux. `Combine` is Apple-only, so
+on non-Apple platforms the core transparently uses
+[`OpenCombine`](https://github.com/OpenCombine/OpenCombine) for
+`ObservableObject`/`@Published` (guarded by `#if canImport(Combine)`; macOS keeps
+using real Combine). With a Swift 6 toolchain installed:
+
+```bash
+swift build            # builds GrokIslandCore
+swift test             # runs the full core test suite (16 tests)
+```
+
+A Cloud Agent environment is defined under `.cursor/` (`environment.json` +
+`Dockerfile`, based on the official `swift:6.0.3-noble` image) so agents can build
+and test the core headlessly.
+
+---
+
 ## Public API (call these from UI)
 
 The thin UI should talk to **`IslandEngine`** (see `IslandEngineAPI`). Services underneath are independently usable and testable.

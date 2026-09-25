@@ -9,9 +9,23 @@ let package = Package(
     products: [
         .library(name: "GrokIslandCore", targets: ["GrokIslandCore"])
     ],
+    dependencies: [
+        // Combine is Apple-only. On non-Apple platforms (e.g. Linux CI / Cloud
+        // Agents) OpenCombine provides ObservableObject/@Published so the core
+        // library and its tests can build and run. It is linked only where
+        // Combine is unavailable (see the target dependency condition below).
+        .package(url: "https://github.com/OpenCombine/OpenCombine.git", from: "0.14.0")
+    ],
     targets: [
         .target(
             name: "GrokIslandCore",
+            dependencies: [
+                .product(
+                    name: "OpenCombine",
+                    package: "OpenCombine",
+                    condition: .when(platforms: [.linux, .windows, .android, .wasi])
+                )
+            ],
             path: "GrokIsland",
             exclude: [
                 "GrokIslandApp.swift",

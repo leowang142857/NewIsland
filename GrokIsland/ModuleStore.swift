@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#else
+import OpenCombine
+#endif
 
 /// Persists user-created `FunctionModule`s as JSON in Application Support.
 ///
