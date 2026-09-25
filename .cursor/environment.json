@@ -1,0 +1,9 @@
+{
+  "name": "GrokIslandCore (Swift on Linux)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "user": "ubuntu",
+  "install": "swift package resolve && swift build --build-tests"
+}
