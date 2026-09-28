@@ -217,6 +217,9 @@ final class DeadlineParserTests: XCTestCase {
         XCTAssertEqual(parse("3小时后 开会").due, now.addingTimeInterval(3 * 3600))
         XCTAssertEqual(parse("晚上8点半 跑步").due, date(9, 30, 20, 30))
         XCTAssertEqual(parse("今晚八点 看直播").due, date(9, 30, 20, 0))
+        XCTAssertEqual(parse("明天下午3点 组会"), ParsedDeadline(
+            title: "组会", due: date(10, 1, 15, 0), matched: ["明天", "下午3点"]
+        ))
         XCTAssertEqual(parse("9:00 早会").due, date(10, 1, 9, 0), "a time already passed today rolls to tomorrow")
     }
 
