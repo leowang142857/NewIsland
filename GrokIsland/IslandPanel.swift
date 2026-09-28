@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Borderless always-on-top panel, pinned to the top center of the preferred screen.
 ///
-/// Chrome (dark glass, neon edge, code rain) lives in the SwiftUI root.
+/// Chrome (aurora glass, aurora edge) lives in the SwiftUI root.
 /// Proximity show / auto-retract is wired here.
 final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -280,7 +280,7 @@ struct PeekStripView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .islandChrome(Capsule(), rainVeil: 0.22, emphasized: presence.isDropTargeted)
+        .islandChrome(Capsule(), glow: 0.8, emphasized: presence.isDropTargeted)
         .islandFlash(Capsule(), trigger: monitor.flashCount)
         .onHover { hovering in
             presence.isHoveringPanel = hovering

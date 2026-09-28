@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Functional shell on the dark cyber glass. Calls `IslandEngine` only.
+/// Functional shell on the aurora glass. Calls `IslandEngine` only.
 struct ShellView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
@@ -61,7 +61,7 @@ struct ShellView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .islandChrome(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
-            rainVeil: 0.32
+            glow: 0.85
         )
         .islandFlash(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),

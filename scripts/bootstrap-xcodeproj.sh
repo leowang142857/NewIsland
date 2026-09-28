@@ -38,7 +38,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01C00000000000000000000C /* IslandEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000C /* IslandEngine.swift */; };
 		01C00000000000000000000D /* IslandPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000D /* IslandPanel.swift */; };
 		01C00000000000000000000E /* ShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000E /* ShellView.swift */; };
-		01C000000000000000000013 /* CyberCodeRain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000013 /* CyberCodeRain.swift */; };
+		01C000000000000000000013 /* IslandChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000013 /* IslandChrome.swift */; };
 		01C000000000000000000012 /* DesktopShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000012 /* DesktopShortcut.swift */; };
 		01C000000000000000000014 /* IslandSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000014 /* IslandSettings.swift */; };
 		01C000000000000000000015 /* CursorCloudAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000015 /* CursorCloudAPI.swift */; };
@@ -66,7 +66,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01B00000000000000000000C /* IslandEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandEngine.swift; sourceTree = "<group>"; };
 		01B00000000000000000000D /* IslandPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandPanel.swift; sourceTree = "<group>"; };
 		01B00000000000000000000E /* ShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellView.swift; sourceTree = "<group>"; };
-		01B000000000000000000013 /* CyberCodeRain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CyberCodeRain.swift; sourceTree = "<group>"; };
+		01B000000000000000000013 /* IslandChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandChrome.swift; sourceTree = "<group>"; };
 		01B000000000000000000012 /* DesktopShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopShortcut.swift; sourceTree = "<group>"; };
 		01B000000000000000000014 /* IslandSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandSettings.swift; sourceTree = "<group>"; };
 		01B000000000000000000015 /* CursorCloudAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorCloudAPI.swift; sourceTree = "<group>"; };
@@ -127,7 +127,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01B000000000000000000001 /* GrokIslandApp.swift */,
 				01B00000000000000000000D /* IslandPanel.swift */,
 				01B00000000000000000000E /* ShellView.swift */,
-				01B000000000000000000013 /* CyberCodeRain.swift */,
+				01B000000000000000000013 /* IslandChrome.swift */,
 				01B000000000000000000012 /* DesktopShortcut.swift */,
 				01B000000000000000000018 /* PageCapture.swift */,
 				01B000000000000000000019 /* ActivityViews.swift */,
@@ -232,7 +232,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01C00000000000000000000C /* IslandEngine.swift in Sources */,
 				01C00000000000000000000D /* IslandPanel.swift in Sources */,
 				01C00000000000000000000E /* ShellView.swift in Sources */,
-				01C000000000000000000013 /* CyberCodeRain.swift in Sources */,
+				01C000000000000000000013 /* IslandChrome.swift in Sources */,
 				01C000000000000000000012 /* DesktopShortcut.swift in Sources */,
 				01C000000000000000000014 /* IslandSettings.swift in Sources */,
 				01C000000000000000000015 /* CursorCloudAPI.swift in Sources */,
