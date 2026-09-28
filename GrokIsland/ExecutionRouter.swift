@@ -58,7 +58,7 @@ final class ExecutionRouter: ObservableObject {
 
     private func launch(_ request: ExecutionRequest, runID: UUID) {
         tasks[runID]?.cancel()
-        journal.transition(id: runID, phase: .running, progress: 0.02, message: "Starting")
+        journal.transition(id: runID, phase: .running, progress: 0.02, message: "启动中")
 
         let worker = executor(for: request.module.executor)
         tasks[runID] = Task { [weak self] in

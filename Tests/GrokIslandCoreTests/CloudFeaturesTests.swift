@@ -392,7 +392,7 @@ final class QuickActionEngineTests: XCTestCase {
         )
     }
 
-    func testRequiresPageOrQuestion() throws {
+    func testRequiresPageOrQuestion() async throws {
         let engine = try makeEngine(GrokBotExecutor(instant: true))
         let empty = PageSnapshot(captureNote: "需要屏幕录制权限")
         XCTAssertThrowsError(try engine.runQuickAction(.solveProblems, page: empty)) { error in
@@ -432,7 +432,7 @@ final class QuickActionEngineTests: XCTestCase {
         XCTAssertTrue(extra.contains("我的问题：重点看第 3 题"))
     }
 
-    func testURLOnlyPageStillRuns() throws {
+    func testURLOnlyPageStillRuns() async throws {
         let engine = try makeEngine(GrokBotExecutor(instant: true))
         let page = PageSnapshot(appName: "Chrome", pageURL: "https://example.com/code", captureNote: "截图失败")
         XCTAssertNoThrow(try engine.runQuickAction(.reviewPageCode, page: page))
