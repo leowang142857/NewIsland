@@ -12,7 +12,7 @@ struct GrokIslandApp: App {
                     .font(.title3.weight(.semibold))
                 Text("The island panel is the main UI. This settings pane is a stub.")
                     .foregroundStyle(.secondary)
-                Text("Modules are stored in Application Support/GrokIsland/function-modules.json")
+                Text("Modules, run records, and DDLs are stored in Application Support/GrokIsland/")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("在桌面创建快捷方式") {
@@ -28,17 +28,26 @@ struct GrokIslandApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = IslandSettings()
+    let deadlines = DeadlineStore(fileURL: DeadlineStore.defaultFileURL)
     lazy var engine: IslandEngine = {
         let storage = settings.storage
         let grok = CursorAgentGrokClient(credentials: { storage.credentials() })
-        return IslandEngine(grokBot: GrokBotExecutor(client: grok))
+        return IslandEngine(
+            journal: RunJournal(fileURL: RunJournal.defaultFileURL),
+            grokBot: GrokBotExecutor(client: grok)
+        )
     }()
     lazy var monitor = CloudActivityMonitor(storage: settings.storage)
     private var panelController: IslandPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        panelController = IslandPanelController(engine: engine, monitor: monitor, settings: settings)
+        panelController = IslandPanelController(
+            engine: engine,
+            monitor: monitor,
+            settings: settings,
+            deadlines: deadlines
+        )
         panelController?.show()
         monitor.start()
     }

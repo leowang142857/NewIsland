@@ -1,46 +1,75 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Functional shell on the aurora glass. Calls `IslandEngine` only.
+/// Expanded island on the aurora glass. Calls `IslandEngine` only.
+///
+/// Home is layered top → bottom: per-task status lights → DDL energy bar →
+/// Grok function strips → modules / records. Detail screens sit one level deeper.
 struct ShellView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
+    @ObservedObject var deadlines: DeadlineStore
+
+    static let dropTypes: [UTType] = [.fileURL, .url, .plainText]
 
     private enum Route: Equatable {
-        case modules
+        case home
         case editor(UUID?)
-        case runs
         case run(UUID)
         case activity
         case settings
     }
 
-    @State private var route: Route = .modules
+    private enum HomeTab: String, CaseIterable, Identifiable {
+        case modules
+        case records
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .modules: "功能模块"
+            case .records: "运行记录"
+            }
+        }
+    }
+
+    @State private var route: Route = .home
+    @State private var homeTab: HomeTab = .modules
     @State private var draftName = ""
     @State private var draftPrompt = ""
     @State private var draftExecutor: ExecutorKind = .grokBot
     @State private var confirmOpenFiles = true
     @State private var confirmCommand = ""
     @State private var shortcutNote: String?
+    @State private var shellDragActive = false
+    @State private var dropTargetModuleID: UUID?
+    @State private var dropMissNote: String?
+
+    private var isDragging: Bool {
+        shellDragActive || presence.isDropTargeted || dropTargetModuleID != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
             Divider()
             switch route {
-            case .modules:
-                moduleGrid
+            case .home:
+                home
             case .editor(let id):
                 editor(editingID: id)
-            case .runs:
-                runsList
             case .run(let id):
                 if let run = engine.runs.first(where: { $0.id == id }) {
-                    RunDetailView(run: run, engine: engine)
+                    RunDetailView(run: run, engine: engine) {
+                        route = .home
+                        homeTab = .records
+                    }
                 } else {
-                    runsList
+                    home
                 }
             case .activity:
                 ActivityListView(monitor: monitor) { route = .settings }
@@ -61,7 +90,8 @@ struct ShellView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .islandChrome(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
-            glow: 0.85
+            glow: 0.85,
+            emphasized: isDragging
         )
         .islandFlash(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
@@ -70,13 +100,33 @@ struct ShellView: View {
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
+        // Drops that miss every module tile land here: reject them and say why.
+        .onDrop(of: Self.dropTypes, isTargeted: $shellDragActive) { _ in
+            showDropMiss()
+            return false
+        }
+        // The peek strip is gone once the island expands mid-drag, so it never reports the
+        // drag ending; clear its flag here or the island would stay held open.
+        .onChange(of: shellDragActive) {
+            if !shellDragActive { presence.isDropTargeted = false }
+        }
+        .onChange(of: dropTargetModuleID) {
+            if dropTargetModuleID == nil, !shellDragActive { presence.isDropTargeted = false }
+        }
+        .onChange(of: isDragging) {
+            guard isDragging else { return }
+            withAnimation(IslandChrome.expandSpring) {
+                route = .home
+                homeTab = .modules
+            }
+        }
         .onAppear { monitor.refreshSoon() }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                if case .modules = route {
+                if case .home = route {
                     Button {
                         route = .activity
                     } label: {
@@ -93,7 +143,7 @@ struct ShellView: View {
                     .help(activityHelp)
                 } else {
                     Button {
-                        route = .modules
+                        route = .home
                     } label: {
                         Label("返回", systemImage: "chevron.left")
                             .labelStyle(.iconOnly)
@@ -101,15 +151,19 @@ struct ShellView: View {
                     .buttonStyle(.borderless)
                     Text(routeTitle)
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                 }
 
                 Spacer()
 
                 if engine.activeRunCount > 0 {
-                    Button("\(engine.activeRunCount) 运行中") { route = .runs }
-                        .buttonStyle(.borderless)
-                        .font(.caption)
-                } else if monitor.snapshot.isBusy, route == .modules {
+                    Button("\(engine.activeRunCount) 运行中") {
+                        route = .home
+                        homeTab = .records
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                } else if monitor.snapshot.isBusy, route == .home {
                     Button {
                         route = .activity
                     } label: {
@@ -124,7 +178,7 @@ struct ShellView: View {
                         .foregroundStyle(.secondary)
                 }
                 Button {
-                    route = route == .settings ? .modules : .settings
+                    route = route == .settings ? .home : .settings
                 } label: {
                     Image(systemName: settings.hasAPIKey ? "gearshape" : "gearshape.fill")
                         .foregroundStyle(settings.hasAPIKey ? Color.primary : Color.orange)
@@ -156,9 +210,8 @@ struct ShellView: View {
 
     private var routeTitle: String {
         switch route {
-        case .modules: "grok岛"
+        case .home: "grok岛"
         case .editor(let id): id == nil ? "新建模块" : "编辑模块"
-        case .runs: "运行状态"
         case .run(let id): engine.runs.first(where: { $0.id == id })?.moduleName ?? "运行结果"
         case .activity: "Cloud Agent · PR"
         case .settings: "设置"
@@ -181,17 +234,102 @@ struct ShellView: View {
         return "Cloud Agent \(snapshot.agents.count) · PR \(snapshot.pullRequests.count) · 本地 \(engine.activeRunCount)"
     }
 
-    // MARK: - Modules
+    // MARK: - Home layers
 
-    private var moduleGrid: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var home: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                TaskLightRail(
+                    lights: TaskLightBoard.lights(runs: engine.runs, snapshot: monitor.snapshot, now: context.date),
+                    onSelect: openLight
+                )
+            }
+
+            DeadlineEnergyBar(store: deadlines) { error in
+                engine.reportError(error)
+            }
+
             GrokQuickBar(engine: engine) { id in route = .run(id) }
-            Divider()
-            HStack {
-                Text("功能模块")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
+            lastAnswerStrip
+
+            layerRule
+            layerTabs
+
+            switch homeTab {
+            case .modules:
+                moduleLayer
+            case .records:
+                RunJournalList(engine: engine) { id in route = .run(id) }
+            }
+        }
+    }
+
+    private var layerRule: some View {
+        Rectangle()
+            .fill(IslandChrome.layerRule)
+            .frame(height: 1)
+            .allowsHitTesting(false)
+    }
+
+    /// Latest Grok answer, one tap from the home screen even after the island retracted.
+    @ViewBuilder
+    private var lastAnswerStrip: some View {
+        if let last = engine.runs.first(where: { $0.origin != .module }) {
+            Button {
+                route = .run(last.id)
+            } label: {
+                HStack(spacing: 5) {
+                    TaskLightDot(state: TaskLightBoard.state(for: last.phase), size: 5)
+                    Text("上次：\(last.question ?? last.moduleName)")
+                        .font(.caption2.weight(.medium))
+                        .lineLimit(1)
+                    Text(last.message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("重新打开这条 Grok 回答")
+        }
+    }
+
+    private var layerTabs: some View {
+        HStack(spacing: 10) {
+            ForEach(HomeTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { homeTab = tab }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(tab.title)
+                        if tab == .records, !engine.runs.isEmpty {
+                            Text("\(engine.runs.count)")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption.weight(homeTab == tab ? .semibold : .regular))
+                    .foregroundStyle(homeTab == tab ? IslandChrome.neonCyan : Color.secondary)
+                    .padding(.bottom, 3)
+                    .overlay(alignment: .bottom) {
+                        if homeTab == tab {
+                            Capsule()
+                                .fill(IslandChrome.neonCyan)
+                                .frame(height: 1.5)
+                                .shadow(color: IslandChrome.neonCyan.opacity(0.8), radius: 3)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+            if homeTab == .modules {
                 Button {
                     beginCreate()
                 } label: {
@@ -200,6 +338,15 @@ struct ShellView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var moduleLayer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isDragging || dropMissNote != nil {
+                dropBanner
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             if engine.modules.isEmpty {
@@ -216,26 +363,62 @@ struct ShellView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
                         ForEach(engine.modules) { module in
                             ModuleTile(
                                 module: module,
                                 engine: engine,
-                                onOpen: { beginEdit(module) }
+                                onOpen: { beginEdit(module) },
+                                onTargetChange: { targeted in updateDropTarget(module.id, targeted: targeted) }
                             )
                         }
                     }
+                    .padding(2)
                 }
-                Text("把文件拖到方块上即可用该模块执行")
+                if !isDragging {
+                    Text("把文件 / 链接拖到方块上，松手即用该模块执行")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .animation(IslandChrome.expandSpring, value: isDragging)
+    }
+
+    /// Tells the user where a drag will go before they let go.
+    private var dropBanner: some View {
+        let target = dropTargetModuleID.flatMap { id in engine.modules.first { $0.id == id } }
+        let missed = dropMissNote != nil && !isDragging
+        let tint = missed ? IslandChrome.alertRed : (target == nil ? IslandChrome.neonCyan : IslandChrome.electricGreen)
+        return HStack(spacing: 6) {
+            Image(systemName: missed ? "xmark.octagon.fill" : (target == nil ? "hand.point.down.fill" : "tray.and.arrow.down.fill"))
+                .font(.caption)
+            if missed, let dropMissNote {
+                Text(dropMissNote)
+                    .font(.caption2.weight(.semibold))
+            } else if let target {
+                Text("松手发送到「\(target.displayName)」")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                Text(target.executor == .grokBot ? "→ Grok 解答" : "→ 本机执行（需确认）")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            } else {
+                Text("拖到下面的模块方块上，松手即执行")
+                    .font(.caption2.weight(.semibold))
             }
-
-            if !engine.runs.isEmpty {
-                Button("查看运行状态") { route = .runs }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(tint.opacity(0.12))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(tint.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: target == nil ? [4, 3] : []))
         }
     }
 
@@ -267,7 +450,7 @@ struct ShellView: View {
                     Button("删除", role: .destructive) {
                         do {
                             try engine.deleteModule(id: editingID)
-                            route = .modules
+                            route = .home
                         } catch {
                             engine.reportError(error)
                         }
@@ -277,57 +460,6 @@ struct ShellView: View {
                 Spacer()
             }
             Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: - Runs
-
-    private var runsList: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Spacer()
-                Button("清理已完成") { engine.clearFinishedRuns() }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-            }
-            if engine.runs.isEmpty {
-                Text("暂无运行记录")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(engine.runs.prefix(12)) { run in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(run.moduleName)
-                                        .font(.caption.weight(.medium))
-                                    Text(run.phase.rawValue)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    if run.isActive {
-                                        Button("取消") { engine.cancelRun(id: run.id) }
-                                            .buttonStyle(.borderless)
-                                            .font(.caption2)
-                                    }
-                                }
-                                if run.phase == .running {
-                                    ProgressView(value: run.progress)
-                                }
-                                Text(run.message)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture { route = .run(run.id) }
-                            .help("点开看完整结果")
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -372,6 +504,36 @@ struct ShellView: View {
 
     // MARK: - Actions
 
+    private func openLight(_ light: TaskLight) {
+        if let runID = light.runID, engine.runs.contains(where: { $0.id == runID }) {
+            route = .run(runID)
+        } else if let link = light.link, let url = URL(string: link) {
+            NSWorkspace.shared.open(url)
+        } else {
+            route = .activity
+        }
+    }
+
+    private func updateDropTarget(_ moduleID: UUID, targeted: Bool) {
+        if targeted {
+            dropTargetModuleID = moduleID
+            dropMissNote = nil
+        } else if dropTargetModuleID == moduleID {
+            dropTargetModuleID = nil
+        }
+    }
+
+    private func showDropMiss() {
+        let note = "没放到模块方块上，这次没有发送"
+        withAnimation { dropMissNote = note }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.2))
+            if dropMissNote == note {
+                withAnimation { dropMissNote = nil }
+            }
+        }
+    }
+
     private func beginCreate() {
         draftName = ""
         draftPrompt = ""
@@ -410,7 +572,7 @@ struct ShellView: View {
                     executor: draftExecutor
                 )
             }
-            route = .modules
+            route = .home
         } catch {
             engine.reportError(error)
         }
@@ -418,61 +580,180 @@ struct ShellView: View {
 }
 
 /// Square module tile. Click opens the editor; dropping resources runs the module.
+///
+/// While a drag hovers it the tile lifts and says where the drop goes; after the drop it
+/// shows reading → sent / rejected, then the module's latest run light.
 struct ModuleTile: View {
     let module: FunctionModule
     @ObservedObject var engine: IslandEngine
     let onOpen: () -> Void
+    var onTargetChange: (Bool) -> Void = { _ in }
+
+    private enum DropFeedback: Equatable {
+        case idle
+        case loading
+        case sent(Int)
+        case rejected(String)
+    }
 
     @State private var targeted = false
+    @State private var feedback: DropFeedback = .idle
+
+    private var latestRun: RunRecord? {
+        guard let run = engine.runs.first(where: { $0.moduleID == module.id }) else { return nil }
+        if run.isActive || Date().timeIntervalSince(run.updatedAt) < TaskLightBoard.recentWindow {
+            return run
+        }
+        return nil
+    }
+
+    private var borderColor: Color {
+        if targeted { return IslandChrome.neonCyan }
+        switch feedback {
+        case .loading: return IslandChrome.neonCyan
+        case .sent: return IslandChrome.electricGreen
+        case .rejected: return IslandChrome.alertRed
+        case .idle: return IslandChrome.neonCyan.opacity(0.28)
+        }
+    }
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 3) {
-                    Image(systemName: module.executor == .grokBot ? "sparkles" : "desktopcomputer")
-                        .font(.caption2)
-                    Text(module.executor.title)
-                        .font(.caption2)
-                    Spacer()
-                }
-                .foregroundStyle(.secondary)
-
-                Text(module.displayName)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-
-                Spacer(minLength: 0)
-
-                if !module.prompt.isEmpty {
-                    Text(module.prompt)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
-            }
-            .padding(7)
-            .frame(height: 78)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(targeted ? IslandChrome.neonCyan.opacity(0.16) : Color.white.opacity(0.05))
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(
-                        targeted ? IslandChrome.neonCyan : IslandChrome.neonCyan.opacity(0.28),
-                        lineWidth: targeted ? 1.5 : 1
-                    )
-            }
+            tileContent
         }
         .buttonStyle(.plain)
-        .help("点击编辑 · 拖入资源以执行")
-        .onDrop(of: [UTType.fileURL, UTType.url, UTType.plainText], isTargeted: $targeted) { providers in
-            engine.ingestDropProviders(providers, assignTo: module.id)
+        .scaleEffect(targeted ? 1.05 : 1)
+        .shadow(color: borderColor.opacity(targeted || feedback != .idle ? 0.8 : 0), radius: targeted ? 8 : 5)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: targeted)
+        .animation(.easeInOut(duration: 0.2), value: feedback)
+        .help(module.executor == .grokBot ? "点击编辑 · 拖入文件 / 链接交给 Grok" : "点击编辑 · 拖入文件在本机执行（需确认）")
+        .onDrop(of: ShellView.dropTypes, isTargeted: $targeted) { providers in
+            feedback = .loading
+            engine.ingestDropProviders(providers, assignTo: module.id) { outcome in
+                switch outcome {
+                case .started(_, let count):
+                    show(.sent(count))
+                case .rejected(let message):
+                    show(.rejected(message))
+                }
+            }
             return true
         }
+        .onChange(of: targeted) {
+            onTargetChange(targeted)
+        }
+    }
+
+    private var tileContent: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 3) {
+                Image(systemName: module.executor == .grokBot ? "sparkles" : "desktopcomputer")
+                    .font(.caption2)
+                Text(module.executor.title)
+                    .font(.caption2)
+                Spacer(minLength: 0)
+                if let latestRun {
+                    TaskLightDot(state: TaskLightBoard.state(for: latestRun.phase), size: 6)
+                        .help("最近一次：\(latestRun.message)")
+                }
+            }
+            .foregroundStyle(.secondary)
+
+            Text(module.displayName)
+                .font(.caption.weight(.semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+
+            if !module.prompt.isEmpty {
+                Text(module.prompt)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+        }
+        .padding(7)
+        .frame(height: 78)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(targeted ? IslandChrome.neonCyan.opacity(0.16) : Color.white.opacity(0.05))
+        )
+        .overlay {
+            if targeted {
+                dropPrompt
+            } else if feedback != .idle {
+                feedbackBadge
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(borderColor, lineWidth: targeted || feedback != .idle ? 1.5 : 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var dropPrompt: some View {
+        VStack(spacing: 3) {
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.title3)
+            Text(module.executor == .grokBot ? "松手发给 Grok" : "松手本机执行")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(IslandChrome.neonCyan)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.55))
+    }
+
+    @ViewBuilder
+    private var feedbackBadge: some View {
+        switch feedback {
+        case .idle:
+            EmptyView()
+        case .loading:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("读取中…")
+            }
+            .modifier(TileBadgeStyle(tint: IslandChrome.neonCyan))
+        case .sent(let count):
+            Label("已发送 \(count) 项", systemImage: "checkmark.circle.fill")
+                .modifier(TileBadgeStyle(tint: IslandChrome.electricGreen))
+        case .rejected(let message):
+            Label("没发出去", systemImage: "xmark.octagon.fill")
+                .modifier(TileBadgeStyle(tint: IslandChrome.alertRed))
+                .help(message)
+        }
+    }
+
+    private func show(_ next: DropFeedback) {
+        feedback = next
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.2))
+            if feedback == next {
+                feedback = .idle
+            }
+        }
+    }
+}
+
+private struct TileBadgeStyle: ViewModifier {
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        content
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.black.opacity(0.7)))
+            .overlay {
+                Capsule().strokeBorder(tint.opacity(0.8), lineWidth: 1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, 6)
     }
 }

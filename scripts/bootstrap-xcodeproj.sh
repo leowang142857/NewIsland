@@ -47,6 +47,10 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01C000000000000000000018 /* PageCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000018 /* PageCapture.swift */; };
 		01C000000000000000000019 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000019 /* ActivityViews.swift */; };
 		01C00000000000000000001A /* GrokViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001A /* GrokViews.swift */; };
+		01C00000000000000000001B /* Deadlines.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001B /* Deadlines.swift */; };
+		01C00000000000000000001C /* TaskLights.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001C /* TaskLights.swift */; };
+		01C00000000000000000001D /* DeadlineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001D /* DeadlineViews.swift */; };
+		01C00000000000000000001E /* RecordViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001E /* RecordViews.swift */; };
 		01C000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000011 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -75,6 +79,10 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01B000000000000000000018 /* PageCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageCapture.swift; sourceTree = "<group>"; };
 		01B000000000000000000019 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
 		01B00000000000000000001A /* GrokViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokViews.swift; sourceTree = "<group>"; };
+		01B00000000000000000001B /* Deadlines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Deadlines.swift; sourceTree = "<group>"; };
+		01B00000000000000000001C /* TaskLights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskLights.swift; sourceTree = "<group>"; };
+		01B00000000000000000001D /* DeadlineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeadlineViews.swift; sourceTree = "<group>"; };
+		01B00000000000000000001E /* RecordViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordViews.swift; sourceTree = "<group>"; };
 		01B00000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		01B000000000000000000010 /* GrokIsland.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GrokIsland.entitlements; sourceTree = "<group>"; };
 		01B000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -109,6 +117,8 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01B000000000000000000015 /* CursorCloudAPI.swift */,
 				01B000000000000000000016 /* CloudActivity.swift */,
 				01B000000000000000000017 /* GrokQuickActions.swift */,
+				01B00000000000000000001B /* Deadlines.swift */,
+				01B00000000000000000001C /* TaskLights.swift */,
 			);
 			name = Core;
 			sourceTree = "<group>";
@@ -132,6 +142,8 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01B000000000000000000018 /* PageCapture.swift */,
 				01B000000000000000000019 /* ActivityViews.swift */,
 				01B00000000000000000001A /* GrokViews.swift */,
+				01B00000000000000000001D /* DeadlineViews.swift */,
+				01B00000000000000000001E /* RecordViews.swift */,
 				01A000000000000000000020 /* Core */,
 				01B00000000000000000000F /* Info.plist */,
 				01B000000000000000000010 /* GrokIsland.entitlements */,
@@ -241,6 +253,10 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01C000000000000000000018 /* PageCapture.swift in Sources */,
 				01C000000000000000000019 /* ActivityViews.swift in Sources */,
 				01C00000000000000000001A /* GrokViews.swift in Sources */,
+				01C00000000000000000001B /* Deadlines.swift in Sources */,
+				01C00000000000000000001C /* TaskLights.swift in Sources */,
+				01C00000000000000000001D /* DeadlineViews.swift in Sources */,
+				01C00000000000000000001E /* RecordViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
