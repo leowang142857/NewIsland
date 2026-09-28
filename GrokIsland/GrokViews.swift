@@ -139,8 +139,12 @@ struct RunDetailView: View {
                 Group {
                     if let answer = run.resultSummary, !run.isActive {
                         MarkdownLite(text: answer)
-                    } else {
+                    } else if run.isActive {
                         Text("Grok 答完后结果会显示在这里。云端 Agent 启动一般要几十秒。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(run.phase == .cancelled ? "已取消，没有结果。" : run.message)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

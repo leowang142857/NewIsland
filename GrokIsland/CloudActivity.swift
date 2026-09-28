@@ -169,6 +169,8 @@ final class CloudActivityMonitor: ObservableObject {
     private let fetchAgents: AgentFetcher
     private let fetchPRs: PRFetcher
     private var loop: Task<Void, Never>?
+    /// Set when settings change mid-fetch; the in-flight fetch read the old key / repo.
+    private var rerunRequested = false
 
     init(
         storage: IslandSettingsStorage = IslandSettingsStorage(),
@@ -201,18 +203,31 @@ final class CloudActivityMonitor: ObservableObject {
         loop = nil
     }
 
-    /// Refresh unless a fetch is in flight or the last one is only a few seconds old.
+    /// Refresh unless the last fetch is only a few seconds old. `minimumAge: 0` means
+    /// settings changed, so a fetch already in flight is followed by a fresh one.
     func refreshSoon(minimumAge: TimeInterval = 8) {
-        if isRefreshing { return }
+        if isRefreshing {
+            if minimumAge <= 0 { rerunRequested = true }
+            return
+        }
         if let updated = snapshot.updatedAt, Date().timeIntervalSince(updated) < minimumAge { return }
         Task { await refresh() }
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
+        if isRefreshing {
+            rerunRequested = true
+            return
+        }
         isRefreshing = true
         defer { isRefreshing = false }
+        repeat {
+            rerunRequested = false
+            await fetchOnce()
+        } while rerunRequested
+    }
 
+    private func fetchOnce() async {
         let credentials = storage.credentials()
         let repo = storage.prRepo
         let fetchAgents = fetchAgents

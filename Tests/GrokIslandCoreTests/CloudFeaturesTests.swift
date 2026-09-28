@@ -119,6 +119,35 @@ final class CloudActivityMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.snapshot.isBusy)
     }
 
+    func testKeySavedMidRefreshRefetchesWithNewKey() async throws {
+        let storage = try storage(withKey: nil)
+        let seenKeys = StringRecorder()
+        let monitor = CloudActivityMonitor(
+            storage: storage,
+            fetchAgents: { credentials in
+                await seenKeys.add(credentials.apiKey)
+                return [CloudAgentSummary(id: "bc-1", status: "ACTIVE")]
+            },
+            fetchPRs: { _ in
+                try await Task.sleep(for: .milliseconds(80))
+                return []
+            }
+        )
+        let inFlight = Task { await monitor.refresh() }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertTrue(monitor.isRefreshing)
+
+        try storage.saveAPIKey("crsr_new")
+        monitor.refreshSoon(minimumAge: 0)
+        await inFlight.value
+
+        let keys = await seenKeys.values
+        XCTAssertEqual(keys, ["crsr_new"])
+        XCTAssertEqual(monitor.snapshot.agents.map(\.id), ["bc-1"])
+        XCTAssertNil(monitor.snapshot.agentNote)
+        XCTAssertFalse(monitor.isRefreshing)
+    }
+
     func testMissingKeyAndPRFailureAreNotes() async throws {
         let monitor = CloudActivityMonitor(
             storage: try storage(withKey: nil),
@@ -190,7 +219,7 @@ final class CursorAgentGrokClientTests: XCTestCase {
             pollInterval: .milliseconds(1)
         )
         let png = PromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")
-        let links = LinkRecorder()
+        let links = StringRecorder()
         let result = try await client.execute(request(images: [png])) { progress in
             if let link = progress.link { await links.add(link) }
         }
@@ -287,9 +316,9 @@ final class CursorAgentGrokClientTests: XCTestCase {
     }
 }
 
-private actor LinkRecorder {
+private actor StringRecorder {
     private(set) var values: [String] = []
-    func add(_ link: String) { values.append(link) }
+    func add(_ value: String) { values.append(value) }
 }
 
 final class GrokPromptBuilderTests: XCTestCase {
