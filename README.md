@@ -61,11 +61,26 @@ swift test
 - 点方块进入编辑 / 删除。
 - 把文件 / 文件夹 / 链接**拖到某个模块方块上**，即用该模块执行（`IslandEngine.ingestDropProviders(_:assignTo:)`）。
 - Local 模块会先确认：提示词不会当 shell；只有确认框里填写的命令才会执行。
-- Grok Bot 目前是演示桩（进度 + 假结果），没有 API key。
+- Grok Bot 模块通过 Cursor Cloud Agents API 开一个不绑仓库的 Agent，用 Grok 模型作答。拖进来的图片会作为图片附上，小文本文件会内联进提示词。
 
 模块保存在：
 
 `~/Library/Application Support/GrokIsland/function-modules.json`
+
+**设置（齿轮）：** 填 Cursor API key（[cursor.com/dashboard/api](https://cursor.com/dashboard/api)）。key 只存在本机 `~/Library/Application Support/GrokIsland/cursor-api-key`（权限 600）。Grok 模型 ID 留空时，会从 `/v1/models` 自动选一个 Grok 模型。
+
+**状态灯（PR / Cloud Agent）：** 细条和标题栏左侧的圆点。
+
+- 有 Cloud Agent 在跑（`GET /v1/agents` 里的 `ACTIVE`）、有待合并的 PR，或者岛上有 Grok 任务在跑时，圆点会呼吸闪烁；PR 的 CI 失败时变橙色。
+- 有任务开始或结束时，岛的边框闪两下。
+- 点圆点可以看列表，点某一行会打开对应页面。
+- PR 通过本机已登录的 `origin` CLI 读取（默认仓库 `leowang142857/GrokIsland`，可在设置里改）。内容已经全部并入 `main` 的 PR 不计入。
+
+**Grok 快捷按钮：** 整理错题、解答题目、检查代码，外加一个「问 Grok」输入框。
+
+- 点按钮时，会截当前最前面的窗口（不会截到岛本身）；如果前台是 Safari、Chrome、Arc、Edge 等浏览器，还会带上当前网址，一起交给 Grok。
+- 结果显示在岛上，可以拷贝，也可以跳到 Cursor 的 Cloud Agent 页面继续追问。
+- 第一次使用时，macOS 会要求开启屏幕录制权限（开启后要重开 app）；读取浏览器网址时会请求自动化权限。
 
 ---
 

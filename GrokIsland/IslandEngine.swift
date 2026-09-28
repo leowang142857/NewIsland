@@ -37,6 +37,7 @@ protocol IslandEngineAPI: AnyObject {
     func cancelPendingLocal()
     func cancelRun(id: UUID)
     func quickAskGrok(_ text: String) throws -> RunRecord
+    func runQuickAction(_ action: GrokQuickAction, page: PageSnapshot, question: String?) throws -> RunRecord
     func clearFinishedRuns()
 }
 
@@ -47,7 +48,7 @@ protocol IslandEngineAPI: AnyObject {
 ///     removeInboxItem / clearInbox
 ///     assignInbox(to:) / runModule
 ///     confirmPendingLocal / cancelPendingLocal / cancelRun
-///     quickAskGrok
+///     quickAskGrok / runQuickAction
 ///     clearFinishedRuns
 @MainActor
 final class IslandEngine: ObservableObject, IslandEngineAPI {
@@ -266,6 +267,47 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
             resources: payload,
             extraPrompt: prompt,
             local: nil
+        )
+        try router.start(request, runID: record.id)
+        return record
+    }
+
+    /// Sends the captured frontmost page to Grok with one of the preset jobs.
+    @discardableResult
+    func runQuickAction(
+        _ action: GrokQuickAction,
+        page: PageSnapshot,
+        question: String? = nil
+    ) throws -> RunRecord {
+        lastError = nil
+        let question = question?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if action == .askAboutPage, question.isEmpty {
+            lastError = IslandError.emptyInput.localizedDescription
+            throw IslandError.emptyInput
+        }
+        guard page.hasContent || !question.isEmpty else {
+            let error = IslandError.pageCaptureFailed(page.captureNote ?? "没有截到当前页面。")
+            lastError = error.localizedDescription
+            throw error
+        }
+        let module = FunctionModule(name: action.title, prompt: action.prompt, executor: .grokBot)
+        let extra = [page.contextDescription, question.isEmpty ? nil : "我的问题：\(question)"]
+            .compactMap { $0 }
+            .joined(separator: "\n\n")
+        let record = journal.enqueue(
+            module: module,
+            name: action.title,
+            executor: .grokBot,
+            resources: [],
+            extraPrompt: extra,
+            phase: .queued
+        )
+        let request = ExecutionRequest(
+            module: module,
+            resources: [],
+            extraPrompt: extra,
+            local: nil,
+            images: page.screenshot.map { [$0] } ?? []
         )
         try router.start(request, runID: record.id)
         return record

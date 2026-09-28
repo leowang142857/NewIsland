@@ -31,8 +31,11 @@ let package = Package(
                 "GrokIslandApp.swift",
                 "IslandPanel.swift",
                 "ShellView.swift",
-                "CyberCodeRain.swift",
+                "IslandChrome.swift",
                 "DesktopShortcut.swift",
+                "PageCapture.swift",
+                "ActivityViews.swift",
+                "GrokViews.swift",
                 "Info.plist",
                 "GrokIsland.entitlements",
                 "Assets.xcassets"

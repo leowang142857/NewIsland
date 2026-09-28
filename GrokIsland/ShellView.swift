@@ -1,15 +1,20 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Functional shell on the dark cyber glass. Calls `IslandEngine` only.
+/// Functional shell on the aurora glass. Calls `IslandEngine` only.
 struct ShellView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
+    @ObservedObject var monitor: CloudActivityMonitor
+    @ObservedObject var settings: IslandSettings
 
     private enum Route: Equatable {
         case modules
         case editor(UUID?)
         case runs
+        case run(UUID)
+        case activity
+        case settings
     }
 
     @State private var route: Route = .modules
@@ -31,6 +36,16 @@ struct ShellView: View {
                 editor(editingID: id)
             case .runs:
                 runsList
+            case .run(let id):
+                if let run = engine.runs.first(where: { $0.id == id }) {
+                    RunDetailView(run: run, engine: engine)
+                } else {
+                    runsList
+                }
+            case .activity:
+                ActivityListView(monitor: monitor) { route = .settings }
+            case .settings:
+                SettingsPane(settings: settings, monitor: monitor, engine: engine)
             }
             if engine.pendingLocal != nil {
                 localConfirm
@@ -46,19 +61,36 @@ struct ShellView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .islandChrome(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
-            rainVeil: 0.32
+            glow: 0.85
+        )
+        .islandFlash(
+            RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
+            trigger: monitor.flashCount
         )
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
+        .onAppear { monitor.refreshSoon() }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 if case .modules = route {
-                    Text("grok岛")
-                        .font(.subheadline.weight(.semibold))
+                    Button {
+                        route = .activity
+                    } label: {
+                        HStack(spacing: 5) {
+                            ActivityLight(
+                                busy: monitor.snapshot.isBusy || engine.activeRunCount > 0,
+                                warning: monitor.snapshot.hasFailingChecks
+                            )
+                            Text("grok岛")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(activityHelp)
                 } else {
                     Button {
                         route = .modules
@@ -77,12 +109,28 @@ struct ShellView: View {
                     Button("\(engine.activeRunCount) 运行中") { route = .runs }
                         .buttonStyle(.borderless)
                         .font(.caption)
+                } else if monitor.snapshot.isBusy, route == .modules {
+                    Button {
+                        route = .activity
+                    } label: {
+                        Text(cloudBadge)
+                            .font(.caption2.monospacedDigit())
+                    }
+                    .buttonStyle(.borderless)
                 }
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     Text(context.date, style: .time)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                Button {
+                    route = route == .settings ? .modules : .settings
+                } label: {
+                    Image(systemName: settings.hasAPIKey ? "gearshape" : "gearshape.fill")
+                        .foregroundStyle(settings.hasAPIKey ? Color.primary : Color.orange)
+                }
+                .buttonStyle(.borderless)
+                .help(settings.hasAPIKey ? "设置" : "设置：还没填 Cursor API key")
                 Button {
                     presence.isPinned.toggle()
                 } label: {
@@ -109,13 +157,34 @@ struct ShellView: View {
         case .modules: "grok岛"
         case .editor(let id): id == nil ? "新建模块" : "编辑模块"
         case .runs: "运行状态"
+        case .run(let id): engine.runs.first(where: { $0.id == id })?.moduleName ?? "运行结果"
+        case .activity: "Cloud Agent · PR"
+        case .settings: "设置"
         }
+    }
+
+    private var cloudBadge: String {
+        let snapshot = monitor.snapshot
+        return [
+            snapshot.agents.isEmpty ? nil : "☁︎\(snapshot.agents.count)",
+            snapshot.pullRequests.isEmpty ? nil : "PR\(snapshot.pullRequests.count)"
+        ]
+        .compactMap { $0 }
+        .joined(separator: " ")
+    }
+
+    private var activityHelp: String {
+        let snapshot = monitor.snapshot
+        guard snapshot.isBusy || engine.activeRunCount > 0 else { return "没有在跑的 Agent / PR，点开看详情" }
+        return "Cloud Agent \(snapshot.agents.count) · PR \(snapshot.pullRequests.count) · 本地 \(engine.activeRunCount)"
     }
 
     // MARK: - Modules
 
     private var moduleGrid: some View {
         VStack(alignment: .leading, spacing: 6) {
+            GrokQuickBar(engine: engine) { id in route = .run(id) }
+            Divider()
             HStack {
                 Text("功能模块")
                     .font(.caption.weight(.semibold))
@@ -250,6 +319,9 @@ struct ShellView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture { route = .run(run.id) }
+                            .help("点开看完整结果")
                         }
                     }
                 }

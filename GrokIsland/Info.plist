@@ -19,6 +19,8 @@
 	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>grok岛 读取浏览器当前标签页的网址，一起发给 Grok 解答。</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>
