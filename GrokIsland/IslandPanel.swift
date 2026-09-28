@@ -88,7 +88,7 @@ final class IslandPanelController {
     /// Room for a row of per-task lights on the left and the next DDL on the right.
     static let defaultPeekSize = CGSize(width: 240, height: 22)
     /// On notched screens each side of the camera housing gets this much visible strip.
-    static let peekWingWidth: CGFloat = 90
+    static let peekWingWidth: CGFloat = 108
     /// Status lights, DDL bar, function strips, and the module grid stacked in layers.
     static let shellSize = CGSize(width: 340, height: 520)
     static let retractDelay: TimeInterval = 0.55
