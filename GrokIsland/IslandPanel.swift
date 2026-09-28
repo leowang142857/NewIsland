@@ -34,6 +34,9 @@ final class IslandPanel: NSPanel {
 }
 
 enum ScreenAnchor {
+    /// Extra gap under the camera housing so expanded chrome is not flush against the notch.
+    static let expandedNotchGap: CGFloat = 6
+
     static func preferredScreen() -> NSScreen {
         let mouse = NSEvent.mouseLocation
         if let hit = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) {
@@ -42,14 +45,23 @@ enum ScreenAnchor {
         return NSScreen.main ?? NSScreen.screens[0]
     }
 
+    /// Peek strip: nest into the notch / menu-bar band (Dynamic Island style).
     static func topY(on screen: NSScreen) -> CGFloat {
         screen.safeAreaInsets.top > 0 ? screen.frame.maxY : screen.visibleFrame.maxY
     }
 
-    /// Notch: pin to `frame.maxY`. No notch: sit just under the menu bar (`visibleFrame.maxY`).
-    static func topCenterFrame(size: CGSize, on screen: NSScreen) -> NSRect {
+    /// Expanded shell: sit fully below the camera housing so the header middle is not clipped.
+    static func expandedTopY(on screen: NSScreen) -> CGFloat {
+        if screen.safeAreaInsets.top > 0 {
+            return screen.frame.maxY - screen.safeAreaInsets.top - expandedNotchGap
+        }
+        return screen.visibleFrame.maxY
+    }
+
+    /// Notch peek pins to `frame.maxY`. Expanded clears the notch. No notch: under the menu bar.
+    static func topCenterFrame(size: CGSize, on screen: NSScreen, clearsNotch: Bool = false) -> NSRect {
         let x = screen.frame.midX - size.width / 2
-        let top = topY(on: screen)
+        let top = clearsNotch ? expandedTopY(on: screen) : topY(on: screen)
         return NSRect(origin: NSPoint(x: x, y: top - size.height), size: size)
     }
 }
@@ -183,7 +195,8 @@ final class IslandPanelController {
             screen = ScreenAnchor.preferredScreen()
         }
         let size = presence.isRevealed ? Self.shellSize : Self.peekSize
-        let next = ScreenAnchor.topCenterFrame(size: size, on: screen)
+        // Expanded: drop below the webcam/notch so the top-row middle stays readable.
+        let next = ScreenAnchor.topCenterFrame(size: size, on: screen, clearsNotch: presence.isRevealed)
         guard panel.frame != next else { return }
         if animated {
             // Soft settle, matched to `IslandChrome.expandSpring` on the SwiftUI scale.

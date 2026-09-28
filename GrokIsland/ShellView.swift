@@ -150,6 +150,8 @@ struct ShellView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        // Slight extra side inset so the top-row middle stays away from the notch column.
+        .padding(.horizontal, 6)
     }
 
     private var routeTitle: String {
