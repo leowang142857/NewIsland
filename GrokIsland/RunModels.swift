@@ -36,6 +36,8 @@ struct RunRecord: Identifiable, Equatable, Sendable {
     var resultSummary: String?
     var createdAt: Date
     var updatedAt: Date
+    /// Where the run can be followed outside the island (e.g. the Cloud Agent page).
+    var link: String? = nil
 
     var isActive: Bool { phase.isActive }
 }
@@ -43,16 +45,25 @@ struct RunRecord: Identifiable, Equatable, Sendable {
 struct ExecutionProgress: Equatable, Sendable {
     var fraction: Double
     var message: String
+    var link: String?
 
-    init(fraction: Double, message: String) {
+    init(fraction: Double, message: String, link: String? = nil) {
         self.fraction = min(max(fraction, 0), 1)
         self.message = message
+        self.link = link
     }
 }
 
 struct ExecutionResult: Equatable, Sendable {
     var summary: String
     var detail: String?
+    var link: String? = nil
+}
+
+/// Image bytes sent alongside a prompt (screenshots, dropped pictures).
+struct PromptImage: Equatable, Sendable {
+    var data: Data
+    var mimeType: String
 }
 
 struct LocalExecutionOptions: Equatable, Sendable {
@@ -74,4 +85,5 @@ struct ExecutionRequest: Sendable {
     var resources: [ResourceItem]
     var extraPrompt: String?
     var local: LocalExecutionOptions?
+    var images: [PromptImage] = []
 }

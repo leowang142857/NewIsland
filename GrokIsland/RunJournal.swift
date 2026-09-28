@@ -56,7 +56,8 @@ final class RunJournal: ObservableObject {
         phase: RunPhase,
         progress: Double? = nil,
         message: String? = nil,
-        resultSummary: String? = nil
+        resultSummary: String? = nil,
+        link: String? = nil
     ) {
         guard let index = runs.firstIndex(where: { $0.id == id }) else { return }
         var record = runs[index]
@@ -71,6 +72,9 @@ final class RunJournal: ObservableObject {
         if let resultSummary {
             record.resultSummary = resultSummary
         }
+        if let link {
+            record.link = link
+        }
         record.updatedAt = Date()
         runs[index] = record
     }
@@ -78,7 +82,13 @@ final class RunJournal: ObservableObject {
     func apply(progress: ExecutionProgress, to id: UUID) {
         guard let record = record(id: id) else { return }
         guard record.phase == .running || record.phase == .queued else { return }
-        transition(id: id, phase: .running, progress: progress.fraction, message: progress.message)
+        transition(
+            id: id,
+            phase: .running,
+            progress: progress.fraction,
+            message: progress.message,
+            link: progress.link
+        )
     }
 
     func fail(id: UUID, message: String) {
@@ -91,7 +101,8 @@ final class RunJournal: ObservableObject {
             phase: .succeeded,
             progress: 1,
             message: result.summary,
-            resultSummary: result.detail ?? result.summary
+            resultSummary: result.detail ?? result.summary,
+            link: result.link
         )
     }
 

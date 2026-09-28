@@ -74,8 +74,8 @@ final class IslandPresence: ObservableObject {
 @MainActor
 final class IslandPanelController {
     static let peekSize = CGSize(width: 196, height: 22)
-    /// Quarter of the old 520x620 shell.
-    static let shellSize = CGSize(width: 260, height: 310)
+    /// Wide enough for Grok answers and the quick-action row.
+    static let shellSize = CGSize(width: 300, height: 400)
     static let retractDelay: TimeInterval = 0.55
     static let pollInterval: TimeInterval = 0.08
 
@@ -87,11 +87,11 @@ final class IslandPanelController {
     private var retractWork: DispatchWorkItem?
     private var revealedOnScreen: NSScreen?
 
-    init(engine: IslandEngine) {
+    init(engine: IslandEngine, monitor: CloudActivityMonitor, settings: IslandSettings) {
         self.engine = engine
         let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize, on: ScreenAnchor.preferredScreen())
         panel = IslandPanel(contentRect: frame)
-        let root = IslandRootView(engine: engine, presence: presence)
+        let root = IslandRootView(engine: engine, presence: presence, monitor: monitor, settings: settings)
         let host = FirstMouseHostingView(rootView: root)
         host.wantsLayer = true
         host.appearance = NSAppearance(named: .darkAqua)
@@ -225,14 +225,16 @@ final class IslandPanelController {
 struct IslandRootView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
+    @ObservedObject var monitor: CloudActivityMonitor
+    @ObservedObject var settings: IslandSettings
 
     var body: some View {
         ZStack {
             if presence.isRevealed {
-                ShellView(engine: engine, presence: presence)
+                ShellView(engine: engine, presence: presence, monitor: monitor, settings: settings)
                     .transition(IslandChrome.revealTransition)
             } else {
-                PeekStripView(engine: engine, presence: presence)
+                PeekStripView(engine: engine, presence: presence, monitor: monitor)
                     .transition(IslandChrome.revealTransition)
             }
         }
@@ -240,6 +242,7 @@ struct IslandRootView: View {
         .animation(IslandChrome.expandSpring, value: presence.isRevealed)
         .preferredColorScheme(.dark)
         .tint(IslandChrome.neonCyan)
+        .onChange(of: engine.activeRunCount) { monitor.flash() }
     }
 }
 
@@ -247,22 +250,38 @@ struct IslandRootView: View {
 struct PeekStripView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
+    @ObservedObject var monitor: CloudActivityMonitor
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(engine.activeRunCount > 0 ? IslandChrome.electricGreen : Color.secondary)
-                .frame(width: 6, height: 6)
+        let snapshot = monitor.snapshot
+        HStack(spacing: 7) {
+            ActivityLight(
+                busy: snapshot.isBusy || engine.activeRunCount > 0,
+                warning: snapshot.hasFailingChecks,
+                size: 6
+            )
             Text("grok岛")
                 .font(.caption.weight(.semibold))
             if engine.activeRunCount > 0 {
-                Text("\(engine.activeRunCount)")
+                Label("\(engine.activeRunCount)", systemImage: "sparkles")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if !snapshot.agents.isEmpty {
+                Text("☁︎\(snapshot.agents.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if !snapshot.pullRequests.isEmpty {
+                Text("PR\(snapshot.pullRequests.count)")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .islandChrome(Capsule(), rainVeil: 0.22, emphasized: presence.isDropTargeted)
+        .islandFlash(Capsule(), trigger: monitor.flashCount)
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }

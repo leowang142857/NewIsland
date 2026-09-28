@@ -27,13 +27,20 @@ struct GrokIslandApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let engine = IslandEngine()
+    let settings = IslandSettings()
+    lazy var engine: IslandEngine = {
+        let storage = settings.storage
+        let grok = CursorAgentGrokClient(credentials: { storage.credentials() })
+        return IslandEngine(grokBot: GrokBotExecutor(client: grok))
+    }()
+    lazy var monitor = CloudActivityMonitor(storage: settings.storage)
     private var panelController: IslandPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        panelController = IslandPanelController(engine: engine)
+        panelController = IslandPanelController(engine: engine, monitor: monitor, settings: settings)
         panelController?.show()
+        monitor.start()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

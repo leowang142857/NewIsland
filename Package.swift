@@ -33,6 +33,9 @@ let package = Package(
                 "ShellView.swift",
                 "CyberCodeRain.swift",
                 "DesktopShortcut.swift",
+                "PageCapture.swift",
+                "ActivityViews.swift",
+                "GrokViews.swift",
                 "Info.plist",
                 "GrokIsland.entitlements",
                 "Assets.xcassets"

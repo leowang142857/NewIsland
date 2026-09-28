@@ -40,6 +40,13 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01C00000000000000000000E /* ShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000000E /* ShellView.swift */; };
 		01C000000000000000000013 /* CyberCodeRain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000013 /* CyberCodeRain.swift */; };
 		01C000000000000000000012 /* DesktopShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000012 /* DesktopShortcut.swift */; };
+		01C000000000000000000014 /* IslandSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000014 /* IslandSettings.swift */; };
+		01C000000000000000000015 /* CursorCloudAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000015 /* CursorCloudAPI.swift */; };
+		01C000000000000000000016 /* CloudActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000016 /* CloudActivity.swift */; };
+		01C000000000000000000017 /* GrokQuickActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000017 /* GrokQuickActions.swift */; };
+		01C000000000000000000018 /* PageCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000018 /* PageCapture.swift */; };
+		01C000000000000000000019 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000019 /* ActivityViews.swift */; };
+		01C00000000000000000001A /* GrokViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001A /* GrokViews.swift */; };
 		01C000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000011 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -61,6 +68,13 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01B00000000000000000000E /* ShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellView.swift; sourceTree = "<group>"; };
 		01B000000000000000000013 /* CyberCodeRain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CyberCodeRain.swift; sourceTree = "<group>"; };
 		01B000000000000000000012 /* DesktopShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopShortcut.swift; sourceTree = "<group>"; };
+		01B000000000000000000014 /* IslandSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandSettings.swift; sourceTree = "<group>"; };
+		01B000000000000000000015 /* CursorCloudAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorCloudAPI.swift; sourceTree = "<group>"; };
+		01B000000000000000000016 /* CloudActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudActivity.swift; sourceTree = "<group>"; };
+		01B000000000000000000017 /* GrokQuickActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokQuickActions.swift; sourceTree = "<group>"; };
+		01B000000000000000000018 /* PageCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageCapture.swift; sourceTree = "<group>"; };
+		01B000000000000000000019 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
+		01B00000000000000000001A /* GrokViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokViews.swift; sourceTree = "<group>"; };
 		01B00000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		01B000000000000000000010 /* GrokIsland.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GrokIsland.entitlements; sourceTree = "<group>"; };
 		01B000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -91,6 +105,10 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01B00000000000000000000A /* RunJournal.swift */,
 				01B00000000000000000000B /* ExecutionRouter.swift */,
 				01B00000000000000000000C /* IslandEngine.swift */,
+				01B000000000000000000014 /* IslandSettings.swift */,
+				01B000000000000000000015 /* CursorCloudAPI.swift */,
+				01B000000000000000000016 /* CloudActivity.swift */,
+				01B000000000000000000017 /* GrokQuickActions.swift */,
 			);
 			name = Core;
 			sourceTree = "<group>";
@@ -111,6 +129,9 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01B00000000000000000000E /* ShellView.swift */,
 				01B000000000000000000013 /* CyberCodeRain.swift */,
 				01B000000000000000000012 /* DesktopShortcut.swift */,
+				01B000000000000000000018 /* PageCapture.swift */,
+				01B000000000000000000019 /* ActivityViews.swift */,
+				01B00000000000000000001A /* GrokViews.swift */,
 				01A000000000000000000020 /* Core */,
 				01B00000000000000000000F /* Info.plist */,
 				01B000000000000000000010 /* GrokIsland.entitlements */,
@@ -213,6 +234,13 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01C00000000000000000000E /* ShellView.swift in Sources */,
 				01C000000000000000000013 /* CyberCodeRain.swift in Sources */,
 				01C000000000000000000012 /* DesktopShortcut.swift in Sources */,
+				01C000000000000000000014 /* IslandSettings.swift in Sources */,
+				01C000000000000000000015 /* CursorCloudAPI.swift in Sources */,
+				01C000000000000000000016 /* CloudActivity.swift in Sources */,
+				01C000000000000000000017 /* GrokQuickActions.swift in Sources */,
+				01C000000000000000000018 /* PageCapture.swift in Sources */,
+				01C000000000000000000019 /* ActivityViews.swift in Sources */,
+				01C00000000000000000001A /* GrokViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
