@@ -38,7 +38,8 @@ protocol IslandEngineAPI: AnyObject {
     func cancelRun(id: UUID)
     func quickAskGrok(_ text: String) throws -> RunRecord
     func runQuickAction(_ action: GrokQuickAction, page: PageSnapshot, question: String?) throws -> RunRecord
-    func clearFinishedRuns()
+    func clearFinishedRuns() -> Int
+    func deleteRuns(ids: Set<UUID>) -> Int
 }
 
 /// Public facade the UI should call. Owns module CRUD, the drop inbox, and execution.
@@ -49,7 +50,7 @@ protocol IslandEngineAPI: AnyObject {
 ///     assignInbox(to:) / runModule
 ///     confirmPendingLocal / cancelPendingLocal / cancelRun
 ///     quickAskGrok / runQuickAction
-///     clearFinishedRuns
+///     clearFinishedRuns / deleteRuns
 @MainActor
 final class IslandEngine: ObservableObject, IslandEngineAPI {
     let moduleStore: ModuleStore
@@ -144,22 +145,34 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
     }
 
     /// Drop straight onto a module tile: resolve the providers, then run that module on them.
-    func ingestDropProviders(_ providers: [NSItemProvider], assignTo moduleID: UUID) {
+    func ingestDropProviders(
+        _ providers: [NSItemProvider],
+        assignTo moduleID: UUID,
+        completion: (@MainActor (DropOutcome) -> Void)? = nil
+    ) {
         Task { [weak self] in
             guard let self else { return }
             let items = await ResourceIntake.loadItems(from: providers)
-            guard !items.isEmpty else {
-                self.lastError = IslandError.inboxEmpty.localizedDescription
-                return
-            }
-            do {
-                try self.runModule(id: moduleID, resources: items)
-            } catch {
-                self.reportError(error)
-            }
+            completion?(self.runDropped(items, on: moduleID))
         }
     }
 #endif
+
+    /// Runs a module on freshly dropped resources and reports what happened for the tile.
+    @discardableResult
+    func runDropped(_ items: [ResourceItem], on moduleID: UUID) -> DropOutcome {
+        guard !items.isEmpty else {
+            lastError = IslandError.dropEmpty.localizedDescription
+            return .rejected(IslandError.dropEmpty.localizedDescription)
+        }
+        do {
+            let record = try runModule(id: moduleID, resources: items)
+            return .started(runID: record.id, itemCount: items.count)
+        } catch {
+            reportError(error)
+            return .rejected(lastError ?? error.localizedDescription)
+        }
+    }
 
     func removeInboxItem(id: UUID) {
         inbox.remove(id: id)
@@ -256,11 +269,13 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
         let payload = inbox.snapshot()
         let record = journal.enqueue(
             module: ephemeral,
-            name: ephemeral.name,
+            name: GrokQuickAction.askAboutPage.title,
             executor: .grokBot,
             resources: payload,
             extraPrompt: prompt,
-            phase: .queued
+            phase: .queued,
+            origin: .quickAsk,
+            question: prompt
         )
         let request = ExecutionRequest(
             module: ephemeral,
@@ -300,7 +315,9 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
             executor: .grokBot,
             resources: [],
             extraPrompt: extra,
-            phase: .queued
+            phase: .queued,
+            origin: action == .askAboutPage ? .quickAsk : .quickAction,
+            question: question.isEmpty ? nil : question
         )
         let request = ExecutionRequest(
             module: module,
@@ -313,8 +330,19 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
         return record
     }
 
-    func clearFinishedRuns() {
+    /// One-click cleanup: drops every succeeded / failed / cancelled record.
+    @discardableResult
+    func clearFinishedRuns() -> Int {
         journal.clearFinished()
+    }
+
+    /// Deletes the selected records. Active ones are cancelled first so no task is orphaned.
+    @discardableResult
+    func deleteRuns(ids: Set<UUID>) -> Int {
+        for id in ids where journal.record(id: id)?.isActive == true {
+            cancelRun(id: id)
+        }
+        return journal.remove(ids: ids)
     }
 
     func reportError(_ error: Error) {

@@ -76,6 +76,16 @@ swift test
 - 点圆点可以看列表，点某一行会打开对应页面。
 - PR 通过本机已登录的 `origin` CLI 读取（默认仓库 `leowang142857/GrokIsland`，可在设置里改）。内容已经全部并入 `main` 的 PR 不计入。
 
+**展开后的分层：** 从上到下依次是 任务状态灯 → DDL 能量条 → 三个功能条 + 问 Grok → 功能模块 / 运行记录。收起时只剩一条细条：左边每个任务一颗灯，右边是最急的 DDL 倒计时（带刘海的屏幕上会分在刘海两侧）。
+
+**每个任务一颗灯：** 岛上的 Grok / 本地运行、Cloud Agent、PR 各自一颗灯。排队 / 运行中会呼吸，完成是绿色、失败是红色，刚结束的任务会保留约 90 秒。展开后状态层是一排可点的小胶囊：点岛上的任务打开结果，点 Agent / PR 打开对应网页。
+
+**DDL 能量条：** 显示下一个截止时间和剩余「能量」（从添加到截止逐渐耗尽，24 小时内变橙、超时变红）。鼠标悬停会展开：列出最近的 DDL（点击修改、圆圈标记完成、× 删除），下面可以直接输入，比如「周五 18:00 交实验报告」「明天下午3点 组会」「3小时后 开会」，会自动识别时间，也可以用日期框手动改。保存在 `Application Support/GrokIsland/deadlines.json`。
+
+**运行记录：** 「运行记录」页里可以只看 Grok 回答；「清理已完成」一键清掉所有已完成 / 失败 / 已取消的记录；「选择」后可以多选删除，也可以用每行右侧的垃圾桶或右键菜单删单条（删除运行中的记录会先取消）。记录保存在 `Application Support/GrokIsland/run-journal.json`，重开 app 后问 Grok 的结果还在；退出时还没跑完的会标成「已中断」。主页的「上次：…」一行可以一键重新打开最近一次 Grok 回答。
+
+**拖放反馈：** 拖着文件 / 链接经过岛时，模块区上方会提示「松手发送到「翻译」→ Grok 解答」；悬停的模块方块会放大并显示「松手发给 Grok / 松手本机执行」。松手后方块先显示「读取中…」，然后绿色「已发送 N 项」或红色「没发出去」，之后方块角上的小灯跟着这次运行变化。没放到任何模块上会提示「这次没有发送」。
+
 **Grok 快捷按钮：** 整理错题、解答题目、检查代码，外加一个「问 Grok」输入框。
 
 - 点按钮时，会截当前最前面的窗口（不会截到岛本身）；如果前台是 Safari、Chrome、Arc、Edge 等浏览器，还会带上当前网址，一起交给 Grok。
@@ -113,7 +123,7 @@ using real Combine). With a Swift 6 toolchain installed:
 
 ```bash
 swift build            # builds GrokIslandCore
-swift test             # runs the full core test suite (16 tests)
+swift test             # runs the full core test suite
 ```
 
 A Cloud Agent environment is defined under `.cursor/` (`environment.json` +
@@ -133,7 +143,9 @@ The thin UI should talk to **`IslandEngine`** (see `IslandEngineAPI`). Services 
 | `ResourceInbox` | In-memory references to dropped files / folders / URLs |
 | `ResourceIntake` | Pasteboard / URL → `ResourceItem` metadata (no file copies) |
 | `ExecutionRouter` | Grok vs Local dispatch + run tasks |
-| `RunJournal` | Run state machine + progress / notifications |
+| `RunJournal` | Run state machine + progress / notifications, optional JSON persistence |
+| `TaskLightBoard` | Per-task lights from runs + Cloud Agent / PR snapshot |
+| `DeadlineStore` / `DeadlineParser` | DDL list persistence, free-text due-date parsing, energy / urgency |
 | `LocalExecutor` | Open files and/or a *confirmed* zsh command |
 | `GrokBotExecutor` | Forwards to a `GrokBotClient` (demo stub by default) |
 
@@ -146,6 +158,8 @@ try engine.assignInbox(to: moduleID)           // requires inbox items
 try engine.confirmPendingLocal(openAttachedFiles: true, shellCommand: "")
 try engine.quickAskGrok("总结这些材料")
 engine.cancelRun(id: runID)
+engine.clearFinishedRuns()                     // one-click cleanup, returns count
+engine.deleteRuns(ids: selectedIDs)            // cancels active ones first
 ```
 
 ### Run state machine
@@ -197,8 +211,14 @@ GrokIsland/
   ExecutorProtocol.swift
   LocalExecutor.swift
   GrokBotExecutor.swift
-  RunJournal.swift
+  RunJournal.swift            # run records (persisted in the app)
   ExecutionRouter.swift
   IslandEngine.swift
+  TaskLights.swift            # one status light per run / Cloud Agent / PR
+  Deadlines.swift             # DDL store, parser, energy
+  ActivityViews.swift         # status lights, activity list
+  DeadlineViews.swift         # DDL energy bar
+  RecordViews.swift           # run records list (clear / multi-select delete)
+  GrokViews.swift             # function strips, run detail, settings
 Tests/GrokIslandCoreTests/
 ```

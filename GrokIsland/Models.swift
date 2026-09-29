@@ -140,11 +140,20 @@ enum IslandState: String, Equatable, Sendable {
     case expanded
 }
 
+/// Result of dropping resources onto a module tile, used for the tile's success / fail light.
+enum DropOutcome: Equatable, Sendable {
+    case started(runID: UUID, itemCount: Int)
+    case rejected(String)
+}
+
 enum IslandError: Error, LocalizedError, Equatable {
     case moduleNameEmpty
     case emptyInput
     case moduleNotFound
     case inboxEmpty
+    case dropEmpty
+    case deadlineTitleEmpty
+    case deadlineNotFound
     case runNotFound
     case localConfirmationRequired
     case cancelled
@@ -162,6 +171,12 @@ enum IslandError: Error, LocalizedError, Equatable {
             return "Function module was not found."
         case .inboxEmpty:
             return "Drop or select resources before running a module."
+        case .dropEmpty:
+            return "没读到可用的文件或链接，换一个再拖进来。"
+        case .deadlineTitleEmpty:
+            return "先写上 DDL 的内容。"
+        case .deadlineNotFound:
+            return "这条日程已经不在了。"
         case .runNotFound:
             return "Run was not found."
         case .localConfirmationRequired:

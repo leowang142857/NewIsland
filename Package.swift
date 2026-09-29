@@ -36,6 +36,8 @@ let package = Package(
                 "PageCapture.swift",
                 "ActivityViews.swift",
                 "GrokViews.swift",
+                "DeadlineViews.swift",
+                "RecordViews.swift",
                 "Info.plist",
                 "GrokIsland.entitlements",
                 "Assets.xcassets"

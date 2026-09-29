@@ -27,6 +27,132 @@ struct ActivityLight: View {
     }
 }
 
+extension TaskLightState {
+    var color: Color {
+        switch self {
+        case .running, .succeeded: IslandChrome.electricGreen
+        case .queued, .idle: IslandChrome.neonCyan
+        case .waiting: IslandChrome.amber
+        case .failed: IslandChrome.alertRed
+        case .cancelled: Color.secondary
+        }
+    }
+}
+
+/// One task's lamp: breathes while queued / running, solid once it has a result.
+struct TaskLightDot: View {
+    var state: TaskLightState
+    var size: CGFloat = 7
+
+    var body: some View {
+        let color = state.color
+        let animated = state.isAnimated
+        let period = state == .running ? 0.8 : 1.4
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !animated)) { context in
+            let wave = animated ? (sin(context.date.timeIntervalSinceReferenceDate * .pi / period) + 1) / 2 : 1
+            Circle()
+                .fill(color)
+                .frame(width: size, height: size)
+                .scaleEffect(animated ? 0.8 + 0.35 * wave : 1)
+                .opacity(animated ? 0.55 + 0.45 * wave : 1)
+                .shadow(color: color.opacity(animated ? 0.9 * wave : 0.55), radius: animated ? 4 : 2)
+        }
+        .frame(width: size * 1.4, height: size * 1.4)
+        .accessibilityLabel(state.label)
+    }
+}
+
+/// Row of per-task dots for the collapsed peek strip (grey dot when idle).
+struct TaskLightStrip: View {
+    let lights: [TaskLight]
+    var limit = 5
+    var size: CGFloat = 6
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if lights.isEmpty {
+                ActivityLight(busy: false, size: size)
+            } else {
+                ForEach(lights.prefix(limit)) { light in
+                    TaskLightDot(state: light.state, size: size)
+                }
+                if lights.count > limit {
+                    Text("+\(lights.count - limit)")
+                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .help(lights.isEmpty ? "空闲" : lights.map { "\($0.kind.label) · \($0.state.label) · \($0.title)" }.joined(separator: "\n"))
+    }
+}
+
+/// Expanded status layer: one chip per run / Cloud Agent / PR. Tap to open it.
+struct TaskLightRail: View {
+    let lights: [TaskLight]
+    let onSelect: (TaskLight) -> Void
+
+    var body: some View {
+        if lights.isEmpty {
+            HStack(spacing: 5) {
+                ActivityLight(busy: false, size: 6)
+                Text("空闲 · 没有在跑的任务")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 22)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(lights) { light in
+                        TaskLightChip(light: light) { onSelect(light) }
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .frame(height: 24)
+        }
+    }
+}
+
+private struct TaskLightChip: View {
+    let light: TaskLight
+    let action: () -> Void
+
+    var body: some View {
+        let tint = light.state.color
+        Button(action: action) {
+            HStack(spacing: 4) {
+                TaskLightDot(state: light.state, size: 6)
+                Text(light.kind.label)
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(tint)
+                Text(light.title)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .frame(maxWidth: 96, alignment: .leading)
+                if let progress = light.progress {
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background {
+                Capsule().fill(tint.opacity(0.12))
+            }
+            .overlay {
+                Capsule().strokeBorder(tint.opacity(0.5), lineWidth: 1)
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("\(light.kind.label) · \(light.state.label) · \(light.title)")
+    }
+}
+
 /// Two quick neon blinks on the island edge whenever `trigger` changes.
 private struct IslandFlash<S: InsettableShape>: ViewModifier {
     let shape: S

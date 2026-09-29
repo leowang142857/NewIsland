@@ -4,8 +4,18 @@ import SwiftUI
 enum IslandChrome {
     static let neonCyan = Color(red: 0.28, green: 0.96, blue: 1.0)
     static let electricGreen = Color(red: 0.62, green: 0.98, blue: 0.45)
+    static let alertRed = Color(red: 1.0, green: 0.36, blue: 0.44)
+    static let amber = Color(red: 1.0, green: 0.80, blue: 0.30)
+    static let ember = Color(red: 1.0, green: 0.56, blue: 0.22)
 
     static let cornerRadius: CGFloat = 16
+
+    /// Thin neon rule between the island's layers.
+    static let layerRule = LinearGradient(
+        colors: [neonCyan.opacity(0), neonCyan.opacity(0.45), electricGreen.opacity(0.3), neonCyan.opacity(0)],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
 
     static let borderGradient = LinearGradient(
         colors: [

@@ -88,20 +88,25 @@ struct GrokQuickBar: View {
     }
 }
 
-/// Full answer for one run, with copy / open-in-Cursor.
+/// Full answer for one run, with copy / open-in-Cursor / delete. Answers stay in the journal.
 struct RunDetailView: View {
     let run: RunRecord
     @ObservedObject var engine: IslandEngine
+    var onDeleted: () -> Void = {}
 
     @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                ActivityLight(busy: run.isActive, warning: run.phase == .failed, size: 6)
+                TaskLightDot(state: TaskLightBoard.state(for: run.phase), size: 6)
                 Text(phaseTitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                Text(run.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
                 Spacer()
                 if run.isActive {
                     Button("取消") { engine.cancelRun(id: run.id) }
@@ -125,6 +130,31 @@ struct RunDetailView: View {
                     }
                     .buttonStyle(.borderless)
                     .help("在 Cursor 打开这个 Cloud Agent，可继续追问")
+                }
+                Button {
+                    engine.deleteRuns(ids: [run.id])
+                    onDeleted()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help(run.isActive ? "取消并删除这条记录" : "删除这条记录")
+            }
+
+            if let question = run.question {
+                HStack(alignment: .top, spacing: 5) {
+                    Text("问")
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(IslandChrome.neonCyan)
+                    Text(question)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(6)
+                .background {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(IslandChrome.neonCyan.opacity(0.08))
                 }
             }
 

@@ -23,6 +23,13 @@ enum RunPhase: String, Codable, Equatable, Sendable {
     }
 }
 
+/// What started a run, so the journal can tell module runs from Grok questions.
+enum RunOrigin: String, Codable, Equatable, Sendable {
+    case module
+    case quickAction
+    case quickAsk
+}
+
 struct RunRecord: Identifiable, Equatable, Sendable {
     var id: UUID
     var moduleID: UUID?
@@ -38,8 +45,57 @@ struct RunRecord: Identifiable, Equatable, Sendable {
     var updatedAt: Date
     /// Where the run can be followed outside the island (e.g. the Cloud Agent page).
     var link: String? = nil
+    var origin: RunOrigin = .module
+    /// What the user typed into 问 Grok, shown above the answer.
+    var question: String? = nil
 
     var isActive: Bool { phase.isActive }
+    var isGrokAnswer: Bool { executor == .grokBot }
+}
+
+extension RunRecord: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, moduleID, moduleName, executor, resources, extraPrompt, phase, progress
+        case message, resultSummary, createdAt, updatedAt, link, origin, question
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        moduleID = try c.decodeIfPresent(UUID.self, forKey: .moduleID)
+        moduleName = try c.decode(String.self, forKey: .moduleName)
+        executor = try c.decode(ExecutorKind.self, forKey: .executor)
+        resources = try c.decodeIfPresent([ResourceItem].self, forKey: .resources) ?? []
+        extraPrompt = try c.decodeIfPresent(String.self, forKey: .extraPrompt)
+        phase = try c.decode(RunPhase.self, forKey: .phase)
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress) ?? 0
+        message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        resultSummary = try c.decodeIfPresent(String.self, forKey: .resultSummary)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        link = try c.decodeIfPresent(String.self, forKey: .link)
+        origin = try c.decodeIfPresent(RunOrigin.self, forKey: .origin) ?? .module
+        question = try c.decodeIfPresent(String.self, forKey: .question)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(moduleID, forKey: .moduleID)
+        try c.encode(moduleName, forKey: .moduleName)
+        try c.encode(executor, forKey: .executor)
+        try c.encode(resources, forKey: .resources)
+        try c.encodeIfPresent(extraPrompt, forKey: .extraPrompt)
+        try c.encode(phase, forKey: .phase)
+        try c.encode(progress, forKey: .progress)
+        try c.encode(message, forKey: .message)
+        try c.encodeIfPresent(resultSummary, forKey: .resultSummary)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(updatedAt, forKey: .updatedAt)
+        try c.encodeIfPresent(link, forKey: .link)
+        try c.encode(origin, forKey: .origin)
+        try c.encodeIfPresent(question, forKey: .question)
+    }
 }
 
 struct ExecutionProgress: Equatable, Sendable {

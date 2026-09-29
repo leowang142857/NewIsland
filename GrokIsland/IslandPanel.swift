@@ -85,9 +85,12 @@ final class IslandPresence: ObservableObject {
 
 @MainActor
 final class IslandPanelController {
-    static let peekSize = CGSize(width: 196, height: 22)
-    /// Wide enough for Grok answers and the quick-action row.
-    static let shellSize = CGSize(width: 300, height: 400)
+    /// Room for a row of per-task lights on the left and the next DDL on the right.
+    static let defaultPeekSize = CGSize(width: 240, height: 22)
+    /// On notched screens each side of the camera housing gets this much visible strip.
+    static let peekWingWidth: CGFloat = 108
+    /// Status lights, DDL bar, function strips, and the module grid stacked in layers.
+    static let shellSize = CGSize(width: 340, height: 520)
     static let retractDelay: TimeInterval = 0.55
     static let pollInterval: TimeInterval = 0.08
 
@@ -99,11 +102,23 @@ final class IslandPanelController {
     private var retractWork: DispatchWorkItem?
     private var revealedOnScreen: NSScreen?
 
-    init(engine: IslandEngine, monitor: CloudActivityMonitor, settings: IslandSettings) {
+    init(
+        engine: IslandEngine,
+        monitor: CloudActivityMonitor,
+        settings: IslandSettings,
+        deadlines: DeadlineStore
+    ) {
         self.engine = engine
-        let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize, on: ScreenAnchor.preferredScreen())
+        let screen = ScreenAnchor.preferredScreen()
+        let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize(on: screen), on: screen)
         panel = IslandPanel(contentRect: frame)
-        let root = IslandRootView(engine: engine, presence: presence, monitor: monitor, settings: settings)
+        let root = IslandRootView(
+            engine: engine,
+            presence: presence,
+            monitor: monitor,
+            settings: settings,
+            deadlines: deadlines
+        )
         let host = FirstMouseHostingView(rootView: root)
         host.wantsLayer = true
         host.appearance = NSAppearance(named: .darkAqua)
@@ -194,7 +209,7 @@ final class IslandPanelController {
         } else {
             screen = ScreenAnchor.preferredScreen()
         }
-        let size = presence.isRevealed ? Self.shellSize : Self.peekSize
+        let size = presence.isRevealed ? Self.shellSize : Self.peekSize(on: screen)
         // Expanded: drop below the webcam/notch so the top-row middle stays readable.
         let next = ScreenAnchor.topCenterFrame(size: size, on: screen, clearsNotch: presence.isRevealed)
         guard panel.frame != next else { return }
@@ -210,6 +225,16 @@ final class IslandPanelController {
         } else {
             panel.setFrame(next, display: true)
         }
+    }
+
+    /// Straddles the notch so the lights and DDL badge sit either side of the camera.
+    static func peekSize(on screen: NSScreen) -> CGSize {
+        guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else {
+            return defaultPeekSize
+        }
+        let notch = screen.frame.width - left.width - right.width
+        guard notch > 0 else { return defaultPeekSize }
+        return CGSize(width: max(defaultPeekSize.width, notch + 2 * peekWingWidth), height: defaultPeekSize.height)
     }
 
     /// Uses `NSEvent.mouseLocation` (no Accessibility / Input Monitoring).
@@ -240,14 +265,21 @@ struct IslandRootView: View {
     @ObservedObject var presence: IslandPresence
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
+    @ObservedObject var deadlines: DeadlineStore
 
     var body: some View {
         ZStack {
             if presence.isRevealed {
-                ShellView(engine: engine, presence: presence, monitor: monitor, settings: settings)
-                    .transition(IslandChrome.revealTransition)
+                ShellView(
+                    engine: engine,
+                    presence: presence,
+                    monitor: monitor,
+                    settings: settings,
+                    deadlines: deadlines
+                )
+                .transition(IslandChrome.revealTransition)
             } else {
-                PeekStripView(engine: engine, presence: presence, monitor: monitor)
+                PeekStripView(engine: engine, presence: presence, monitor: monitor, deadlines: deadlines)
                     .transition(IslandChrome.revealTransition)
             }
         }
@@ -259,38 +291,17 @@ struct IslandRootView: View {
     }
 }
 
-/// Thin top-center tab while the shell is retracted.
+/// Thin top-center tab while the shell is retracted: one light per task on the left,
+/// the most pressing DDL on the right. Everything else waits for the expanded island.
 struct PeekStripView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
     @ObservedObject var monitor: CloudActivityMonitor
+    @ObservedObject var deadlines: DeadlineStore
 
     var body: some View {
-        let snapshot = monitor.snapshot
-        HStack(spacing: 7) {
-            ActivityLight(
-                busy: snapshot.isBusy || engine.activeRunCount > 0,
-                warning: snapshot.hasFailingChecks,
-                size: 6
-            )
-            Text("grok岛")
-                .font(.caption.weight(.semibold))
-            if engine.activeRunCount > 0 {
-                Label("\(engine.activeRunCount)", systemImage: "sparkles")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            if !snapshot.agents.isEmpty {
-                Text("☁︎\(snapshot.agents.count)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            if !snapshot.pullRequests.isEmpty {
-                Text("PR\(snapshot.pullRequests.count)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            content(now: context.date)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .islandChrome(Capsule(), glow: 0.8, emphasized: presence.isDropTargeted)
@@ -299,9 +310,25 @@ struct PeekStripView: View {
             presence.isHoveringPanel = hovering
         }
         // Dragging over the strip only reveals the shell; resources are dropped onto a module tile.
-        .onDrop(of: [UTType.fileURL, UTType.url, UTType.plainText], isTargeted: dropBinding) { _ in
+        .onDrop(of: ShellView.dropTypes, isTargeted: dropBinding) { _ in
             false
         }
+    }
+
+    private func content(now: Date) -> some View {
+        let lights = TaskLightBoard.lights(runs: engine.runs, snapshot: monitor.snapshot, now: now)
+        let next = deadlines.summary(now: now).next
+        return HStack(spacing: 6) {
+            TaskLightStrip(lights: lights)
+            Spacer(minLength: 6)
+            Text("grok岛")
+                .font(.caption.weight(.semibold))
+            if let next, next.urgency(now: now).isPressing {
+                DeadlineBadge(item: next, now: now)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var dropBinding: Binding<Bool> {
