@@ -75,6 +75,12 @@ struct IslandSettingsStorage: Sendable {
         nonmutating set { defaults.set(newValue, forKey: "grokModelID") }
     }
 
+    /// Keeps the island collapsed: hovering the peek strip no longer expands it.
+    var isPeekLocked: Bool {
+        get { defaults.bool(forKey: "peekLocked") }
+        nonmutating set { defaults.set(newValue, forKey: "peekLocked") }
+    }
+
     func credentials() -> CursorCredentials? {
         guard let key = loadAPIKey() else { return nil }
         return CursorCredentials(apiKey: key, modelID: grokModelID)
@@ -158,6 +164,9 @@ final class IslandSettings: ObservableObject {
             storage.islandBackground = background
         }
     }
+    @Published var isPeekLocked: Bool {
+        didSet { storage.isPeekLocked = isPeekLocked }
+    }
 
     init(storage: IslandSettingsStorage = IslandSettingsStorage()) {
         self.storage = storage
@@ -165,6 +174,7 @@ final class IslandSettings: ObservableObject {
         prRepo = storage.prRepo
         grokModelID = storage.grokModelID
         background = storage.islandBackground
+        isPeekLocked = storage.isPeekLocked
     }
 
     var backgroundImageURL: URL? { storage.backgroundImageURL(for: background) }
