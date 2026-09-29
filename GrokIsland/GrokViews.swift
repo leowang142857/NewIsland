@@ -273,7 +273,7 @@ struct MarkdownLite: View {
     }
 }
 
-/// Cursor API key, Grok model, PR repo, and permissions.
+/// Cursor API key, Grok model, PR repo, permissions, and the island background.
 struct SettingsPane: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var monitor: CloudActivityMonitor
@@ -357,6 +357,12 @@ struct SettingsPane: View {
                         note("快捷按钮要截当前页面。勾选 grok岛 后重开 app。")
                     }
                 }
+
+                Rectangle()
+                    .fill(IslandChrome.layerRule)
+                    .frame(height: 1)
+
+                IslandBackgroundSection(settings: settings)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

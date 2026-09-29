@@ -91,7 +91,9 @@ struct ShellView: View {
         .islandChrome(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
             glow: 0.85,
-            emphasized: isDragging
+            emphasized: isDragging,
+            background: settings.background,
+            imageURL: settings.backgroundImageURL
         )
         .islandFlash(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),

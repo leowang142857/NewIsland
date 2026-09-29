@@ -1,3 +1,5 @@
+import AppKit
+import ImageIO
 import SwiftUI
 
 /// Shared chrome for the floating island: aurora sky glass, a thin aurora edge, spring reveal.
@@ -161,36 +163,158 @@ private struct AuroraSky: View {
     }
 }
 
-/// Dark frosted fill. Material is rearmost so it can blur the desktop; the aurora sits on
-/// top of it, and a soft dark veil keeps white UI text readable over the bright bands.
+/// Dark frosted fill. Material is rearmost so it can blur the desktop; the aurora (or the
+/// user's own fill) sits on top of it, and a dark veil keeps white UI text readable.
 struct IslandGlassBackdrop: View {
     var glow: Double = 1
+    var style: IslandBackgroundStyle = .default
+    var imageURL: URL?
 
     var body: some View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)
-            AuroraBackdrop(glow: glow)
-                .opacity(0.94)
-            LinearGradient(
-                colors: [.black.opacity(0.24), .black.opacity(0.06), .black.opacity(0.34)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            if let fill = customFill {
+                fill
+                    .opacity(style.opacity)
+                if style.auroraOverlay > 0 {
+                    AuroraBackdrop(glow: glow * style.auroraOverlay)
+                        .opacity(style.auroraOverlay)
+                        .blendMode(.screen)
+                }
+                customVeil
+            } else {
+                AuroraBackdrop(glow: glow)
+                    .opacity(0.94)
+                LinearGradient(
+                    colors: [.black.opacity(0.24), .black.opacity(0.06), .black.opacity(0.34)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
+
+    /// Nil means "use the stock aurora", including when the picked image can't be read.
+    private var customFill: IslandBackgroundFill? {
+        switch style.kind {
+        case .aurora:
+            return nil
+        case .solid, .gradient:
+            return IslandBackgroundFill(style: style, image: nil)
+        case .image:
+            guard let image = IslandBackgroundImageCache.image(at: imageURL) else { return nil }
+            return IslandBackgroundFill(style: style, image: image)
+        }
+    }
+
+    /// Heavier at the header and footer, where the densest text sits.
+    private var customVeil: some View {
+        let dim = style.effectiveDim
+        return LinearGradient(
+            colors: [.black.opacity(dim * 0.95), .black.opacity(dim * 0.7), .black.opacity(min(1, dim * 1.1))],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
+/// The user's solid color, gradient, or photo, without any veil.
+struct IslandBackgroundFill: View {
+    let style: IslandBackgroundStyle
+    let image: NSImage?
+
+    var body: some View {
+        switch style.kind {
+        case .aurora:
+            Color.clear
+        case .solid:
+            Rectangle().fill(Color(islandRGB: style.solid))
+        case .gradient:
+            let points = style.gradientPoints
+            LinearGradient(
+                colors: style.gradient.map { Color(islandRGB: $0) },
+                startPoint: UnitPoint(x: points.start.x, y: points.start.y),
+                endPoint: UnitPoint(x: points.end.x, y: points.end.y)
+            )
+        case .image:
+            if let image {
+                Color.clear
+                    .overlay {
+                        Image(nsImage: image)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFill()
+                    }
+                    .clipped()
+                    .blur(radius: style.imageBlur, opaque: true)
+            } else {
+                Color.clear
+            }
+        }
+    }
+}
+
+extension Color {
+    init(islandRGB rgb: IslandRGB) {
+        self.init(.sRGB, red: rgb.red, green: rgb.green, blue: rgb.blue, opacity: 1)
+    }
+}
+
+extension IslandRGB {
+    init?(color: Color) {
+        guard let srgb = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        self.init(red: Double(srgb.redComponent), green: Double(srgb.greenComponent), blue: Double(srgb.blueComponent))
+    }
+}
+
+/// Decodes the background photo once, downsampled to about the island's Retina size.
+/// Imported photos get a fresh file name, so caching by URL never serves a stale picture.
+enum IslandBackgroundImageCache {
+    private static let maxPixelSize = 1400
+    private static let lock = NSLock()
+    private static var cached: (url: URL, image: NSImage?)?
+
+    static func image(at url: URL?) -> NSImage? {
+        guard let url else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached, cached.url == url { return cached.image }
+        let image = decode(url)
+        cached = (url, image)
+        return image
+    }
+
+    static func canDecode(_ url: URL) -> Bool {
+        decode(url) != nil
+    }
+
+    private static func decode(_ url: URL) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
 }
 
 extension View {
-    /// Rounded (or capsule) aurora glass with a thin aurora stroke.
+    /// Rounded (or capsule) aurora glass with a thin aurora stroke. Pass a custom `background`
+    /// to swap the aurora for the user's fill; the neon stroke stays either way.
     func islandChrome<S: InsettableShape>(
         _ shape: S,
         glow: Double = 1,
-        emphasized: Bool = false
+        emphasized: Bool = false,
+        background style: IslandBackgroundStyle = .default,
+        imageURL: URL? = nil
     ) -> some View {
         background {
-            IslandGlassBackdrop(glow: glow)
+            IslandGlassBackdrop(glow: glow, style: style, imageURL: imageURL)
         }
         .clipShape(shape)
         .overlay {

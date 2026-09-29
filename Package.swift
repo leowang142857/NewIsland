@@ -38,6 +38,7 @@ let package = Package(
                 "GrokViews.swift",
                 "DeadlineViews.swift",
                 "RecordViews.swift",
+                "BackgroundViews.swift",
                 "Info.plist",
                 "GrokIsland.entitlements",
                 "Assets.xcassets"

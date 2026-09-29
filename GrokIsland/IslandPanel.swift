@@ -79,7 +79,13 @@ final class IslandPresence: ObservableObject {
     @Published var isHoveringPanel = false
 
     func shouldHold(engine: IslandEngine) -> Bool {
-        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil
+        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil || Self.systemPickerIsOpen
+    }
+
+    /// The file picker and color panel float outside the island. Retracting under them would
+    /// tear down the settings screen that opened them.
+    static var systemPickerIsOpen: Bool {
+        NSApp.modalWindow != nil || (NSColorPanel.sharedColorPanelExists && NSColorPanel.shared.isVisible)
     }
 }
 
