@@ -69,6 +69,13 @@ swift test
 
 **设置（齿轮）：** 填 Cursor API key（[cursor.com/dashboard/api](https://cursor.com/dashboard/api)）。key 只存在本机 `~/Library/Application Support/GrokIsland/cursor-api-key`（权限 600）。Grok 模型 ID 留空时，会从 `/v1/models` 自动选一个 Grok 模型。
 
+**岛背景（设置 → 岛背景）：** 展开后的岛可以换背景：默认「极光」，也可以选「纯色」「渐变」（6 个预设 + 自己挑色标和角度）或「图片」（从磁盘选一张，可调模糊）。霓虹边框和分隔线不变；毛玻璃仍在最底层。
+
+- 「暗化」给背景盖一层暗色，保证白字和霓虹边框清楚。背景偏亮时会自动提高最低暗化（图片至少 18%），设置里会提示。
+- 「不透明度」调低会透出下面的毛玻璃；「极光叠加」把流动极光轻轻叠在自定义背景上（设为 0 就完全静止）。
+- 改动即时生效，设置页后面的岛本身就是预览。「恢复默认」回到极光并删掉复制的图片。
+- 选的图片会复制到 `~/Library/Application Support/GrokIsland/backgrounds/`，原图之后移动或删除都没关系；换图时旧的副本会被清掉。其余选项存在 UserDefaults（`islandBackground`）。收起时的细条保持极光。
+
 **状态灯（PR / Cloud Agent）：** 细条和标题栏左侧的圆点。
 
 - 有 Cloud Agent 在跑（`GET /v1/agents` 里的 `ACTIVE`）、有待合并的 PR，或者岛上有 Grok 任务在跑时，圆点会呼吸闪烁；PR 的 CI 失败时变橙色。
@@ -146,6 +153,7 @@ The thin UI should talk to **`IslandEngine`** (see `IslandEngineAPI`). Services 
 | `RunJournal` | Run state machine + progress / notifications, optional JSON persistence |
 | `TaskLightBoard` | Per-task lights from runs + Cloud Agent / PR snapshot |
 | `DeadlineStore` / `DeadlineParser` | DDL list persistence, free-text due-date parsing, energy / urgency |
+| `IslandBackgroundStyle` | Expanded-island background (aurora / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
 | `LocalExecutor` | Open files and/or a *confirmed* zsh command |
 | `GrokBotExecutor` | Forwards to a `GrokBotClient` (demo stub by default) |
 
@@ -216,9 +224,11 @@ GrokIsland/
   IslandEngine.swift
   TaskLights.swift            # one status light per run / Cloud Agent / PR
   Deadlines.swift             # DDL store, parser, energy
+  IslandBackground.swift      # custom island background style, presets, readability veil
   ActivityViews.swift         # status lights, activity list
   DeadlineViews.swift         # DDL energy bar
   RecordViews.swift           # run records list (clear / multi-select delete)
   GrokViews.swift             # function strips, run detail, settings
+  BackgroundViews.swift       # settings section for the island background
 Tests/GrokIslandCoreTests/
 ```
