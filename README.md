@@ -48,9 +48,14 @@ platform-independent Swift package (`GrokIslandCore`) with its own test suite.
   and it retracts after about half a second. It stays open while it is pinned
   (pin button in the header), while you drag something over it, and while a
   Local run is waiting for your confirmation.
-- On Macs with a notch, the peek strip straddles the camera housing, and the
-  expanded island drops just below it. On screens without a notch it sits under
-  the menu bar.
+- A **collapse lock** sits at the left end of the peek strip. Click it (it turns
+  amber) to keep the island collapsed even when the pointer is over the strip or
+  you drag files across it; click again to unlock. Hovering the lock itself does
+  not expand the island, so you can always reach it. The lock state is remembered
+  across launches.
+- On Macs with a notch, the peek strip hugs the camera housing and only shows
+  about 56 pt on each side of the notch; the expanded island drops just below it.
+  On screens without a notch it is a ~164 pt capsule under the menu bar.
 - Hover detection polls `NSEvent.mouseLocation`, so no Accessibility or Input
   Monitoring permission is needed.
 
@@ -61,9 +66,10 @@ When expanded, the island is organized in layers, from top to bottom:
 3. **Grok quick actions** — three one-tap buttons plus an "Ask Grok" field.
 4. **Modules / run records** — your module grid, or the history of runs.
 
-When collapsed, the peek strip shows one light per task on the left and the
-countdown of the most pressing deadline on the right (split across both sides of
-the notch on notched screens).
+When collapsed, the peek strip shows the collapse lock on the far left, then up
+to a few task lights (two lights plus a count when there are more than three),
+and the countdown of the most pressing deadline on the right (split across both
+sides of the notch on notched screens).
 
 ### Modular island (function modules)
 
@@ -239,10 +245,28 @@ Open the settings pane with the **gear** button on the island.
 | **Grok model ID** | Leave empty to automatically pick a Grok model from `/v1/models`, or enter a specific model ID. |
 | **PR repository** | The `owner/name` repository whose open PRs drive the PR lights. Defaults to `leowang142857/GrokIsland`. |
 | **Screen Recording** | Shows whether the permission is granted, with a shortcut to System Settings. |
+| **Island background** | The expanded island's backdrop. Default is the built-in aurora glass; you can switch to solid color, gradient (presets or custom stops/angle), or an image from disk (with blur). Click **默认** ("Default") anytime to return to aurora while keeping your custom colors and image for later. |
 
 Without an API key, modules, deadlines, and Local runs still work; Grok requests
 fail with a prompt to add a key, and the Cloud Agent section shows that no key
 is set.
+
+### Island background details
+
+- **Darken** lays a veil over the backdrop so white text and neon edges stay
+  readable. Bright backgrounds raise the minimum veil automatically (images at
+  least 18%), and Settings shows a hint when that happens.
+- **Opacity** lets the glass beneath show through when lowered. **Aurora overlay**
+  softly stacks the flowing aurora on a custom backdrop (set to 0 for a still
+  background).
+- Changes apply immediately; the island behind the settings pane is the live
+  preview. **全部重置** ("Reset all") restores the default background and clears
+  custom colors and the copied image.
+- Chosen images are copied into
+  `~/Library/Application Support/GrokIsland/backgrounds/` so the original can
+  move or be deleted later; switching images removes the previous copy. Other
+  options live in UserDefaults (`islandBackground`). The collapsed peek strip
+  always keeps the aurora look.
 
 ---
 
@@ -278,6 +302,7 @@ Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
 | `function-modules.json` | Your modules |
 | `deadlines.json` | Your deadlines |
 | `run-journal.json` | Run records, including Grok answers |
+| `backgrounds/` | Copies of custom island background images |
 | `cursor-api-key` | Your Cursor API key (`0600`) |
 
 The Grok model ID and PR repository are stored in the app's user defaults.
@@ -327,6 +352,7 @@ on their own.
 | `TaskLightBoard` | One light per run, Cloud Agent, and PR |
 | `DeadlineStore` / `DeadlineParser` | Deadline persistence, free-text due-date parsing, energy and urgency |
 | `IslandSettings` / `IslandSettingsStorage` | API key file, Grok model ID, PR repository |
+| `IslandBackgroundStyle` | Expanded-island background (aurora / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
 
 ### Typical calls
 
@@ -369,11 +395,14 @@ Package.swift                 # GrokIslandCore library + tests
 GrokIsland/
   GrokIslandApp.swift         # @main and AppDelegate
   IslandPanel.swift           # NSPanel host, hover reveal / retract, peek strip
+  PeekStrip.swift             # collapsed peek strip, collapse lock, notch hug
   IslandChrome.swift          # glass backdrop, colors, animations
+  IslandBackground.swift      # custom island background style, presets, veil
   ShellView.swift             # expanded island: header, layers, module grid
   ActivityViews.swift         # task lights and activity list
   DeadlineViews.swift         # DDL energy bar
   GrokViews.swift             # quick actions, run detail, settings pane
+  BackgroundViews.swift       # settings section for the island background
   RecordViews.swift           # run records (filter, clear, multi-select delete)
   PageCapture.swift           # frontmost-window screenshot and browser URL
   DesktopShortcut.swift       # ~/Applications copy + Desktop alias

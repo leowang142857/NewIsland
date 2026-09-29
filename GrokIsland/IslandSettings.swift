@@ -75,9 +75,74 @@ struct IslandSettingsStorage: Sendable {
         nonmutating set { defaults.set(newValue, forKey: "grokModelID") }
     }
 
+    /// Keeps the island collapsed: hovering the peek strip no longer expands it.
+    var isPeekLocked: Bool {
+        get { defaults.bool(forKey: "peekLocked") }
+        nonmutating set { defaults.set(newValue, forKey: "peekLocked") }
+    }
+
     func credentials() -> CursorCredentials? {
         guard let key = loadAPIKey() else { return nil }
         return CursorCredentials(apiKey: key, modelID: grokModelID)
+    }
+
+    // MARK: - Island background
+
+    static let backgroundImageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "heic", "heif", "gif", "tif", "tiff", "webp", "bmp", "avif"
+    ]
+    static let maxBackgroundImageBytes: Int64 = 40 * 1_048_576
+
+    /// Picked images are copied here, so moving or deleting the original does not break the island.
+    var backgroundsFolder: URL { folder.appendingPathComponent("backgrounds", isDirectory: true) }
+
+    var islandBackground: IslandBackgroundStyle {
+        get {
+            guard let data = defaults.data(forKey: "islandBackground"),
+                  let style = try? JSONDecoder().decode(IslandBackgroundStyle.self, from: data)
+            else { return .default }
+            return style
+        }
+        nonmutating set {
+            let data = try? JSONEncoder().encode(newValue.sanitized())
+            defaults.set(data, forKey: "islandBackground")
+        }
+    }
+
+    /// The copied image for `style`, or nil when it has none or the file is gone.
+    func backgroundImageURL(for style: IslandBackgroundStyle) -> URL? {
+        guard let name = style.imageFileName, IslandBackgroundStyle.isPlainFileName(name) else { return nil }
+        let url = backgroundsFolder.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Copies `source` into the backgrounds folder under a fresh name and returns that name.
+    func importBackgroundImage(from source: URL) throws -> String {
+        let ext = source.pathExtension.lowercased()
+        guard Self.backgroundImageExtensions.contains(ext) else {
+            throw IslandBackgroundError.unsupportedFormat(ext)
+        }
+        let fm = FileManager.default
+        guard let attributes = try? fm.attributesOfItem(atPath: source.path),
+              (attributes[.type] as? FileAttributeType) == .typeRegular
+        else { throw IslandBackgroundError.unreadable }
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        guard size > 0 else { throw IslandBackgroundError.unreadable }
+        guard size <= Self.maxBackgroundImageBytes else { throw IslandBackgroundError.tooLarge(size) }
+
+        try fm.createDirectory(at: backgroundsFolder, withIntermediateDirectories: true)
+        let name = "\(UUID().uuidString).\(ext)"
+        try fm.copyItem(at: source, to: backgroundsFolder.appendingPathComponent(name))
+        return name
+    }
+
+    /// Deletes every copied image except `fileName`.
+    func pruneBackgroundImages(keeping fileName: String?) {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: backgroundsFolder.path) else { return }
+        for name in names where name != fileName {
+            try? fm.removeItem(at: backgroundsFolder.appendingPathComponent(name))
+        }
     }
 }
 
@@ -93,12 +158,41 @@ final class IslandSettings: ObservableObject {
     @Published var grokModelID: String {
         didSet { storage.grokModelID = grokModelID }
     }
+    @Published var background: IslandBackgroundStyle {
+        didSet {
+            guard background != oldValue else { return }
+            storage.islandBackground = background
+        }
+    }
+    @Published var isPeekLocked: Bool {
+        didSet { storage.isPeekLocked = isPeekLocked }
+    }
 
     init(storage: IslandSettingsStorage = IslandSettingsStorage()) {
         self.storage = storage
         hasAPIKey = storage.loadAPIKey() != nil
         prRepo = storage.prRepo
         grokModelID = storage.grokModelID
+        background = storage.islandBackground
+        isPeekLocked = storage.isPeekLocked
+    }
+
+    var backgroundImageURL: URL? { storage.backgroundImageURL(for: background) }
+
+    /// Copies the picked image into Application Support and switches the island to it.
+    func importBackgroundImage(from url: URL) throws {
+        let name = try storage.importBackgroundImage(from: url)
+        var next = background
+        next.kind = .image
+        next.imageFileName = name
+        background = next
+        storage.pruneBackgroundImages(keeping: name)
+    }
+
+    /// Back to the stock aurora; the copied image is deleted.
+    func resetBackground() {
+        background = .default
+        storage.pruneBackgroundImages(keeping: nil)
     }
 
     func saveAPIKey(_ key: String) throws {

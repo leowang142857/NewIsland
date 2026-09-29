@@ -79,22 +79,27 @@ final class IslandPresence: ObservableObject {
     @Published var isHoveringPanel = false
 
     func shouldHold(engine: IslandEngine) -> Bool {
-        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil
+        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil || Self.systemPickerIsOpen
+    }
+
+    /// The file picker and color panel float outside the island. Retracting under them would
+    /// tear down the settings screen that opened them.
+    static var systemPickerIsOpen: Bool {
+        NSApp.modalWindow != nil || (NSColorPanel.sharedColorPanelExists && NSColorPanel.shared.isVisible)
     }
 }
 
 @MainActor
 final class IslandPanelController {
-    /// Room for a row of per-task lights on the left and the next DDL on the right.
-    static let defaultPeekSize = CGSize(width: 240, height: 22)
-    /// On notched screens each side of the camera housing gets this much visible strip.
-    static let peekWingWidth: CGFloat = 108
+    /// Lock + per-task lights on the left, the name, and the next DDL on the right.
+    static let defaultPeekSize = CGSize(width: PeekStrip.defaultWidth, height: PeekStrip.height)
     /// Status lights, DDL bar, function strips, and the module grid stacked in layers.
     static let shellSize = CGSize(width: 340, height: 520)
     static let retractDelay: TimeInterval = 0.55
     static let pollInterval: TimeInterval = 0.08
 
     private let engine: IslandEngine
+    private let settings: IslandSettings
     let presence = IslandPresence()
     private let panel: IslandPanel
     private var screenObserver: NSObjectProtocol?
@@ -109,6 +114,7 @@ final class IslandPanelController {
         deadlines: DeadlineStore
     ) {
         self.engine = engine
+        self.settings = settings
         let screen = ScreenAnchor.preferredScreen()
         let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize(on: screen), on: screen)
         panel = IslandPanel(contentRect: frame)
@@ -160,14 +166,32 @@ final class IslandPanelController {
     }
 
     private func tick() {
-        if mouseInHotZone() || presence.shouldHold(engine: engine) {
+        if presence.isRevealed {
+            if mouseInHotZone() || presence.shouldHold(engine: engine) {
+                cancelRetract()
+            } else {
+                scheduleRetract()
+            }
+        } else if collapsedStripWantsReveal() {
             cancelRetract()
             setRevealed(true)
-        } else if presence.isRevealed {
-            scheduleRetract()
         } else {
             applyFrame(animated: false)
         }
+    }
+
+    /// The peek strip's own hover flag is ignored here: the lock slice must not count as hover.
+    private func collapsedStripWantsReveal() -> Bool {
+        let mouse = NSEvent.mouseLocation
+        let frame = panel.frame
+        return PeekStrip.shouldReveal(
+            locked: settings.isPeekLocked,
+            mouseInStrip: Self.hotZone(revealed: false, panelFrame: frame, screen: ScreenAnchor.preferredScreen()).contains(mouse),
+            mouseOnLock: PeekStrip.isOnLock(mouseX: mouse.x, stripMinX: frame.minX),
+            dropTargeted: presence.isDropTargeted,
+            pinned: presence.isPinned,
+            awaitingConfirmation: engine.pendingLocal != nil
+        )
     }
 
     private func setRevealed(_ revealed: Bool) {
@@ -227,14 +251,13 @@ final class IslandPanelController {
         }
     }
 
-    /// Straddles the notch so the lights and DDL badge sit either side of the camera.
+    /// Hugs the camera housing: one short wing each side of the notch for the lights and DDL badge.
     static func peekSize(on screen: NSScreen) -> CGSize {
-        guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else {
-            return defaultPeekSize
+        var notch: CGFloat?
+        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            notch = screen.frame.width - left.width - right.width
         }
-        let notch = screen.frame.width - left.width - right.width
-        guard notch > 0 else { return defaultPeekSize }
-        return CGSize(width: max(defaultPeekSize.width, notch + 2 * peekWingWidth), height: defaultPeekSize.height)
+        return CGSize(width: PeekStrip.width(notchWidth: notch), height: PeekStrip.height)
     }
 
     /// Uses `NSEvent.mouseLocation` (no Accessibility / Input Monitoring).
@@ -279,7 +302,7 @@ struct IslandRootView: View {
                 )
                 .transition(IslandChrome.revealTransition)
             } else {
-                PeekStripView(engine: engine, presence: presence, monitor: monitor, deadlines: deadlines)
+                PeekStripView(engine: engine, presence: presence, monitor: monitor, settings: settings, deadlines: deadlines)
                     .transition(IslandChrome.revealTransition)
             }
         }
@@ -291,12 +314,14 @@ struct IslandRootView: View {
     }
 }
 
-/// Thin top-center tab while the shell is retracted: one light per task on the left,
-/// the most pressing DDL on the right. Everything else waits for the expanded island.
+/// Thin top-center tab while the shell is retracted: the collapse lock and one light per task
+/// on the left, the most pressing DDL on the right. On a notched Mac the name sits under the
+/// camera and only the two wings show. Everything else waits for the expanded island.
 struct PeekStripView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
     @ObservedObject var monitor: CloudActivityMonitor
+    @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
 
     var body: some View {
@@ -304,7 +329,7 @@ struct PeekStripView: View {
             content(now: context.date)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .islandChrome(Capsule(), glow: 0.8, emphasized: presence.isDropTargeted)
+        .islandChrome(Capsule(), glow: 0.8, emphasized: presence.isDropTargeted && !settings.isPeekLocked)
         .islandFlash(Capsule(), trigger: monitor.flashCount)
         .onHover { hovering in
             presence.isHoveringPanel = hovering
@@ -318,17 +343,48 @@ struct PeekStripView: View {
     private func content(now: Date) -> some View {
         let lights = TaskLightBoard.lights(runs: engine.runs, snapshot: monitor.snapshot, now: now)
         let next = deadlines.summary(now: now).next
-        return HStack(spacing: 6) {
-            TaskLightStrip(lights: lights)
-            Spacer(minLength: 6)
+        return HStack(spacing: 0) {
+            HStack(spacing: 2) {
+                lockButton
+                TaskLightStrip(lights: lights, limit: PeekStrip.lightLimit(count: lights.count))
+                Spacer(minLength: 0)
+            }
+            .frame(width: PeekStrip.wingWidth)
+
             Text("grok岛")
                 .font(.caption.weight(.semibold))
-            if let next, next.urgency(now: now).isPressing {
-                DeadlineBadge(item: next, now: now)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if let next, next.urgency(now: now).isPressing {
+                    DeadlineBadge(item: next, now: now)
+                }
             }
+            .padding(.trailing, PeekStrip.trailingInset)
+            .frame(width: PeekStrip.wingWidth)
         }
-        .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Leftmost control. Its slice of the strip never triggers the hover reveal.
+    private var lockButton: some View {
+        let locked = settings.isPeekLocked
+        return Button {
+            settings.isPeekLocked.toggle()
+        } label: {
+            Image(systemName: locked ? "lock.fill" : "lock.open")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(locked ? IslandChrome.amber : Color.secondary)
+                .shadow(color: IslandChrome.amber.opacity(locked ? 0.7 : 0), radius: 3)
+                .frame(width: PeekStrip.lockZoneWidth, height: PeekStrip.height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(locked ? "已锁定收起：鼠标悬停不会展开。点一下解锁" : "锁定收起：鼠标悬停不再自动展开")
+        .accessibilityLabel(locked ? "解锁，恢复悬停展开" : "锁定收起")
     }
 
     private var dropBinding: Binding<Bool> {
