@@ -244,6 +244,27 @@ final class IslandSettingsBackgroundTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: storage.backgroundsFolder.path), [])
     }
 
+    func testBuiltInLookIsDefaultAndSwitchingBackKeepsCustomChoices() async throws {
+        let storage = makeStorage()
+        let settings = IslandSettings(storage: storage)
+        XCTAssertEqual(settings.background.kind, .aurora, "a fresh install keeps the original frosted neon aurora")
+        XCTAssertFalse(settings.background.usesCustomFill)
+
+        try settings.importBackgroundImage(from: try writeFile("mine.png"))
+        settings.background.solid = IslandBackgroundStyle.solidPresets[3].color
+        let imageURL = try XCTUnwrap(settings.backgroundImageURL)
+
+        settings.background.kind = .aurora
+        XCTAssertFalse(settings.background.usesCustomFill, "back on the built-in look")
+        XCTAssertEqual(settings.backgroundImageURL, imageURL, "the photo is kept for switching back")
+
+        let relaunched = IslandSettings(storage: IslandSettingsStorage(folder: storage.folder, defaultsSuite: storage.defaultsSuite))
+        XCTAssertEqual(relaunched.background.kind, .aurora)
+        XCTAssertEqual(relaunched.background.solid, IslandBackgroundStyle.solidPresets[3].color)
+        relaunched.background.kind = .image
+        XCTAssertEqual(relaunched.backgroundImageURL, imageURL)
+    }
+
     func testFailedImportLeavesTheCurrentStyleAlone() async throws {
         let settings = IslandSettings(storage: makeStorage())
         settings.background.kind = .solid

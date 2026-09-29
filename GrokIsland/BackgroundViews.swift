@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Settings block for the expanded island's background: stock aurora, solid, gradient, or a photo.
+/// Settings block for the expanded island's background: the built-in aurora (default), or an
+/// opt-in solid, gradient, or photo.
 /// Edits apply live, so the island behind this screen is the preview.
 struct IslandBackgroundSection: View {
     @ObservedObject var settings: IslandSettings
@@ -19,12 +20,13 @@ struct IslandBackgroundSection: View {
                     .font(.caption.weight(.semibold))
                 Spacer()
                 if settings.background != .default {
-                    Button("恢复默认") {
+                    Button("全部重置") {
                         settings.resetBackground()
                         note = nil
                     }
                     .buttonStyle(.borderless)
                     .font(.caption2)
+                    .help("回到默认背景，并清掉自定义的颜色和图片。只想切回原样、保留自定义，点上面的「默认」就行。")
                 }
             }
 
@@ -39,7 +41,7 @@ struct IslandBackgroundSection: View {
 
             switch settings.background.kind {
             case .aurora:
-                caption("默认的流动极光。换成纯色、渐变或图片后，霓虹边框保持不变。")
+                caption("内置的赛博毛玻璃霓虹极光，就是原来的样子。自定义的颜色和图片会保留，随时可以切回去。")
             case .solid:
                 solidControls
             case .gradient:

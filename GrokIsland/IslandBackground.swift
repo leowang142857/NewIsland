@@ -78,7 +78,7 @@ enum IslandBackgroundKind: String, Codable, CaseIterable, Identifiable, Sendable
 
     var title: String {
         switch self {
-        case .aurora: "极光"
+        case .aurora: "默认"
         case .solid: "纯色"
         case .gradient: "渐变"
         case .image: "图片"
@@ -87,6 +87,9 @@ enum IslandBackgroundKind: String, Codable, CaseIterable, Identifiable, Sendable
 }
 
 /// What sits behind the expanded island's content, on top of the frosted desktop blur.
+///
+/// `.aurora` is the built-in cyber frosted-glass neon look and stays the default; the custom
+/// kinds are opt-in, and switching back keeps their colors and photo for next time.
 ///
 /// Custom fills get a dark veil (`effectiveDim`) so white text and the neon chrome stay
 /// readable; bright colors raise the veil's floor no matter what the slider says.
