@@ -238,6 +238,16 @@ final class DeadlineParserTests: XCTestCase {
         ))
     }
 
+    func testEnergyLoadFollowsCellCount() {
+        XCTAssertEqual(EnergyLoad.level(for: 0), .calm)
+        XCTAssertEqual(EnergyLoad.level(for: 1), .calm)
+        XCTAssertEqual(EnergyLoad.level(for: 3), .calm)
+        XCTAssertEqual(EnergyLoad.level(for: 4), .busy)
+        XCTAssertEqual(EnergyLoad.level(for: 6), .busy)
+        XCTAssertEqual(EnergyLoad.level(for: 7), .overloaded)
+        XCTAssertEqual(EnergyLoad.level(for: 12), .overloaded)
+    }
+
     func testPlainTextHasNoDate() {
         XCTAssertEqual(parse("  交报告 "), ParsedDeadline(title: "交报告", due: nil, matched: []))
     }
