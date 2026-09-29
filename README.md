@@ -6,7 +6,7 @@ Modules are persistent skills you define (e.g. 翻译, 整理笔记, 跑脚本) 
 
 The window is a **minimal functional shell** so the backend can be exercised. Island chrome and glass are intentionally not built (`TODO(frontend)`).
 
-The panel stays docked at the top center (not freely draggable). **Only hovering the collapsed peek strip** shows it; moving away auto-retracts. Pin it from the header if you want it to stay open. Uses `NSEvent.mouseLocation` (no Accessibility permission).
+The panel stays docked at the top center (not freely draggable). **Only hovering the collapsed peek strip** shows it; moving away auto-retracts. Pin it from the header if you want it to stay open; the lock at the left end of the peek strip does the opposite and keeps it collapsed even under the mouse. Uses `NSEvent.mouseLocation` (no Accessibility permission).
 
 To put a launcher on the Desktop: click the header shortcut button, or run `./scripts/make-desktop-shortcut.sh` on a Mac. That copies the app to `~/Applications/grok岛.app` and creates a Finder alias `~/Desktop/grok岛`.
 
@@ -52,6 +52,8 @@ swift test
 
 **面板：** 默认上提成细条；只有鼠标碰到这条细边框才会滑下来。移开约 0.5 秒后自动上提。确认 Local 运行或点「钉住」时不会收起。
 
+**锁定收起：** 细条最左边是一把锁。点一下锁上（琥珀色），鼠标悬停、拖文件经过都不会再展开；再点一下解锁，恢复悬停展开。鼠标停在锁上本身不会触发展开，所以没锁时也能点到它。锁定状态会记住，重开 app 后不变。
+
 **桌面快捷方式：** 展开后面板标题栏的方块箭头按钮，或在仓库根目录执行 `./scripts/make-desktop-shortcut.sh`。桌面会出现「grok岛」。
 
 **试用后端：**
@@ -73,7 +75,7 @@ swift test
 
 - 「暗化」给背景盖一层暗色，保证白字和霓虹边框清楚。背景偏亮时会自动提高最低暗化（图片至少 18%），设置里会提示。
 - 「不透明度」调低会透出下面的毛玻璃；「极光叠加」把流动极光轻轻叠在自定义背景上（设为 0 就完全静止）。
-- 改动即时生效，设置页后面的岛本身就是预览。「恢复默认」回到极光并删掉复制的图片。
+- 改动即时生效，设置页后面的岛本身就是预览。「全部重置」回到默认背景，并清掉自定义颜色和复制的图片。
 - 选的图片会复制到 `~/Library/Application Support/GrokIsland/backgrounds/`，原图之后移动或删除都没关系；换图时旧的副本会被清掉。其余选项存在 UserDefaults（`islandBackground`）。收起时的细条保持极光。
 
 **状态灯（PR / Cloud Agent）：** 细条和标题栏左侧的圆点。
@@ -83,7 +85,7 @@ swift test
 - 点圆点可以看列表，点某一行会打开对应页面。
 - PR 通过本机已登录的 `origin` CLI 读取（默认仓库 `leowang142857/GrokIsland`，可在设置里改）。内容已经全部并入 `main` 的 PR 不计入。
 
-**展开后的分层：** 从上到下依次是 任务状态灯 → DDL 能量条 → 三个功能条 + 问 Grok → 功能模块 / 运行记录。收起时只剩一条细条：左边每个任务一颗灯，右边是最急的 DDL 倒计时（带刘海的屏幕上会分在刘海两侧）。
+**展开后的分层：** 从上到下依次是 任务状态灯 → DDL 能量条 → 三个功能条 + 问 Grok → 功能模块 / 运行记录。收起时只剩一条细条：最左边是锁，接着每个任务一颗灯（超过 3 个时显示 2 颗 + 数字），右边是最急的 DDL 倒计时。带刘海的 MacBook 上细条紧贴摄像头外壳，只在刘海两侧各露出约 56 pt；没有刘海的屏幕上是约 164 pt 宽的小胶囊。
 
 **每个任务一颗灯：** 岛上的 Grok / 本地运行、Cloud Agent、PR 各自一颗灯。排队 / 运行中会呼吸，完成是绿色、失败是红色，刚结束的任务会保留约 90 秒。展开后状态层是一排可点的小胶囊：点岛上的任务打开结果，点 Agent / PR 打开对应网页。
 
