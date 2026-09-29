@@ -20,29 +20,51 @@ private func defaultDeadlineDue(now: Date = Date()) -> Date {
     return calendar.date(byAdding: .day, value: 1, to: tonight) ?? tonight
 }
 
-/// Segmented neon gauge. `value` 1 = full energy, 0 = drained.
-struct EnergyGauge: View {
-    var value: Double
-    var color: Color
-    var segments: Int = 12
+extension EnergyLoad {
+    var color: Color {
+        switch self {
+        case .calm: IslandChrome.electricGreen
+        case .busy: IslandChrome.ember
+        case .overloaded: IslandChrome.alertRed
+        }
+    }
+}
+
+/// One energy bar. Each pending task is a single cell, and every cell shares the
+/// color for that count: green up to 3, orange for 4–6, red from 7.
+struct TaskEnergyBar: View {
+    let items: [DeadlineItem]
+    let now: Date
+    var highlightedID: UUID?
+
+    private var load: EnergyLoad { EnergyLoad.level(for: items.count) }
 
     var body: some View {
-        GeometryReader { geo in
-            let count = max(segments, 1)
-            let gap: CGFloat = 2
-            let width = max((geo.size.width - gap * CGFloat(count - 1)) / CGFloat(count), 1)
-            let lit = Int((min(max(value, 0), 1) * Double(count)).rounded(.up))
-            let track = value <= 0 ? color.opacity(0.28) : Color.white.opacity(0.1)
-            HStack(spacing: gap) {
-                ForEach(0..<count, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                        .fill(index < lit ? color : track)
-                        .frame(width: width)
-                        .shadow(color: index < lit ? color.opacity(0.7) : Color.clear, radius: 2)
+        let gap: CGFloat = 2
+        let color = load.color
+        Group {
+            if items.isEmpty {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Color.white.opacity(0.1))
+            } else {
+                HStack(spacing: gap) {
+                    ForEach(items) { item in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(color)
+                            .frame(maxWidth: .infinity)
+                            .overlay {
+                                if highlightedID == item.id {
+                                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.9), lineWidth: 1)
+                                }
+                            }
+                            .shadow(color: color.opacity(0.7), radius: 2)
+                            .help("\(item.title) · \(DeadlineFormat.countdown(item.remaining(now: now)))")
+                    }
                 }
             }
         }
-        .accessibilityLabel("剩余能量 \(Int(value * 100))%")
+        .accessibilityLabel(items.isEmpty ? "没有任务" : "\(items.count) 个任务，\(load.label)")
     }
 }
 
@@ -64,8 +86,8 @@ struct DeadlineBadge: View {
     }
 }
 
-/// DDL energy strip above the function strips. Collapsed it shows the next deadline
-/// draining; hovering (or typing into it) expands the list and the add / edit field.
+/// One DDL energy strip above the function strips. Each task is one cell in that bar.
+/// Hovering (or typing into it) expands the list and the add / edit field.
 struct DeadlineEnergyBar: View {
     @ObservedObject var store: DeadlineStore
     var onError: (Error) -> Void = { _ in }
@@ -96,7 +118,9 @@ struct DeadlineEnergyBar: View {
 
     private func card(now: Date) -> some View {
         let summary = store.summary(now: now)
-        let accent = summary.next?.urgency(now: now).color ?? IslandChrome.neonCyan
+        let accent = summary.pendingCount == 0
+            ? IslandChrome.neonCyan
+            : EnergyLoad.level(for: summary.pendingCount).color
         return VStack(alignment: .leading, spacing: 6) {
             summaryRow(summary, now: now)
             if expanded {
@@ -119,11 +143,11 @@ struct DeadlineEnergyBar: View {
     }
 
     private func summaryRow(_ summary: DeadlineSummary, now: Date) -> some View {
-        let urgency = summary.next?.urgency(now: now) ?? .relaxed
+        let load = EnergyLoad.level(for: summary.pendingCount)
         return HStack(spacing: 6) {
             Image(systemName: summary.next == nil ? "bolt" : "bolt.fill")
                 .font(.caption)
-                .foregroundStyle(summary.next == nil ? Color.secondary : urgency.color)
+                .foregroundStyle(summary.next == nil ? Color.secondary : load.color)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text("DDL")
@@ -136,20 +160,17 @@ struct DeadlineEnergyBar: View {
                         Spacer(minLength: 4)
                         Text(DeadlineFormat.countdown(next.remaining(now: now)))
                             .font(.caption2.monospacedDigit())
-                            .foregroundStyle(urgency.color)
+                            .foregroundStyle(load.color)
                             .lineLimit(1)
                     } else {
-                        Text("能量满格 · 悬停添加日程")
+                        Text("还没有任务 · 悬停添加")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                     }
                 }
-                EnergyGauge(
-                    value: summary.next?.energy(now: now) ?? 1,
-                    color: summary.next == nil ? IslandChrome.neonCyan.opacity(0.5) : urgency.color
-                )
-                .frame(height: 5)
+                TaskEnergyBar(items: store.pending, now: now, highlightedID: editingID)
+                    .frame(height: 6)
             }
             if summary.pendingCount > 1 {
                 Text("\(summary.pendingCount)")
@@ -300,18 +321,14 @@ private struct DeadlineRow: View {
             .buttonStyle(.borderless)
             .help("标记完成")
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(item.title)
-                        .font(.caption)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(DeadlineFormat.dueLabel(item.due, now: now))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(urgency == .overdue ? urgency.color : Color.secondary)
-                }
-                EnergyGauge(value: item.energy(now: now), color: urgency.color, segments: 16)
-                    .frame(height: 3)
+            HStack(spacing: 4) {
+                Text(item.title)
+                    .font(.caption)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(DeadlineFormat.dueLabel(item.due, now: now))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(urgency == .overdue ? urgency.color : Color.secondary)
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onEdit)

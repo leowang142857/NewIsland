@@ -47,6 +47,32 @@ struct DeadlineItem: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// Color band for the single energy bar, based on how many tasks it holds.
+enum EnergyLoad: Equatable, Sendable {
+    /// 3 cells or fewer.
+    case calm
+    /// 4 to 6 cells.
+    case busy
+    /// 7 cells or more.
+    case overloaded
+
+    static func level(for count: Int) -> EnergyLoad {
+        switch count {
+        case ...3: .calm
+        case 4...6: .busy
+        default: .overloaded
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .calm: "绿色"
+        case .busy: "橙色"
+        case .overloaded: "红色"
+        }
+    }
+}
+
 enum DeadlineUrgency: Int, Comparable, Sendable {
     case overdue
     case critical
