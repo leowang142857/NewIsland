@@ -1,224 +1,414 @@
-# grok岛 / Grok Island
+# GrokIsland (grok岛)
 
-Native macOS app (SwiftUI + AppKit). A top-of-screen panel that accepts dropped files / folders / URLs and runs them through **user-created function modules**.
+GrokIsland — also referred to as NewIsland — is a native macOS app that puts a
+Dynamic Island–style panel at the top of your screen. It combines three things in
+one small, always-available surface:
 
-Modules are persistent skills you define (e.g. 翻译, 整理笔记, 跑脚本) — not auto-split task chunks.
+- **A modular island.** Drop files, folders, or links onto modules you define
+  yourself (for example "Translate", "Organize notes", "Run a script") and let
+  them run.
+- **A deadline (DDL) energy bar.** Type deadlines in plain language and watch a
+  single energy bar show how much is on your plate.
+- **Ask Grok and watch your Cursor agents.** Send the page in front of you to a
+  Grok model through the Cursor Cloud Agents API, and see status lights for your
+  running Cloud Agents and open pull requests.
 
-The window is a **minimal functional shell** so the backend can be exercised. Island chrome and glass are intentionally not built (`TODO(frontend)`).
+The app is written in Swift with SwiftUI and AppKit. The core logic lives in a
+platform-independent Swift package (`GrokIslandCore`) with its own test suite.
 
-The panel stays docked at the top center (not freely draggable). **Only hovering the collapsed peek strip** shows it; moving away auto-retracts. Pin it from the header if you want it to stay open. Uses `NSEvent.mouseLocation` (no Accessibility permission).
-
-To put a launcher on the Desktop: click the header shortcut button, or run `./scripts/make-desktop-shortcut.sh` on a Mac. That copies the app to `~/Applications/grok岛.app` and creates a Finder alias `~/Desktop/grok岛`.
-
-Default view is a grid of module tiles plus a **新建模块** button. Click a tile to edit it; **drop resources onto a tile** to run that module on them.
+> **Language note:** the in-app interface is currently in Chinese, the deadline
+> parser understands Chinese date and time expressions, and Grok is asked to
+> answer in Chinese. UI labels are quoted in this README with an English
+> translation.
 
 ---
 
-## 打开 / 构建 / 运行（中文）
+## Contents
 
-这是云端新建的项目：代码在 Agent 仓库里，**不会自动出现在你电脑上的旧文件夹**。本地要先有完整仓库：
+- [Features](#features)
+- [Requirements](#requirements)
+- [Build and run with Xcode](#build-and-run-with-xcode)
+- [Configuration](#configuration)
+- [Privacy, permissions, and secrets](#privacy-permissions-and-secrets)
+- [Where data is stored](#where-data-is-stored)
+- [Headless core and tests (macOS or Linux)](#headless-core-and-tests-macos-or-linux)
+- [Architecture](#architecture)
+- [Project layout](#project-layout)
+- [Contributing](#contributing)
 
-1. 在本 Agent 页面点 **Create repo**，创建一个 GitHub / Origin 仓库。
-2. 在 Mac 上 clone **那个新仓库**（不要打开你之前的空目录）。
-3. 根目录应同时有 `GrokIsland/`（源码）和 `GrokIsland.xcodeproj`（Xcode 工程包）。Finder 里 `.xcodeproj` 显示成一个文件，不是文件夹。
+---
 
-只有源码、没有工程文件时，在仓库根目录执行：
+## Features
 
-```bash
-./scripts/bootstrap-xcodeproj.sh
-```
+### The island
 
-然后：
+- The panel is docked at the top center of the screen and cannot be dragged
+  around. When collapsed it is a thin **peek strip**.
+- **Hover over the peek strip** to slide the island open. Move the pointer away
+  and it retracts after about half a second. It stays open while it is pinned
+  (pin button in the header), while you drag something over it, and while a
+  Local run is waiting for your confirmation.
+- On Macs with a notch, the peek strip straddles the camera housing, and the
+  expanded island drops just below it. On screens without a notch it sits under
+  the menu bar.
+- Hover detection polls `NSEvent.mouseLocation`, so no Accessibility or Input
+  Monitoring permission is needed.
 
-1. 安装 Xcode 15+（macOS 14+）。
-2. 打开工程：
+When expanded, the island is organized in layers, from top to bottom:
 
-```bash
-open GrokIsland.xcodeproj
-```
+1. **Task lights** — one light per running or recently finished task.
+2. **DDL energy bar** — all open deadlines in one bar.
+3. **Grok quick actions** — three one-tap buttons plus an "Ask Grok" field.
+4. **Modules / run records** — your module grid, or the history of runs.
 
-3. 选择 scheme **GrokIsland**，目标为本机 Mac，点 Run（⌘R）。
-4. 或命令行：
+When collapsed, the peek strip shows one light per task on the left and the
+countdown of the most pressing deadline on the right (split across both sides of
+the notch on notched screens).
+
+### Modular island (function modules)
+
+Modules are persistent, user-defined skills — not automatically generated task
+chunks. Each module has a name, a prompt, and an executor:
+
+| Executor | What it does |
+| --- | --- |
+| **Grok Bot** | Sends the prompt and the dropped resources to a Grok model via a Cursor Cloud Agent (see [Ask Grok](#ask-grok-via-cursor-cloud-agents)). |
+| **Local** | Runs on your Mac: optionally opens the dropped files, and optionally runs a shell command that you type and confirm. |
+
+How to use them:
+
+- Click **新建模块** ("New module") to create one. With an empty list you can
+  also click **载入示例** ("Load examples") to add three demo modules: 翻译
+  (Translate), 整理笔记 (Organize notes), and 打开文件 (Open files).
+- Click a tile to edit or delete the module.
+- **Drag files, folders, or links onto a tile** to run that module on them.
+
+Drop feedback is explicit so you always know what happened:
+
+- While dragging over the island, a hint names the target module and whether it
+  goes to Grok or runs locally; the hovered tile grows.
+- After you let go, the tile shows "reading…", then either a green
+  "sent N items" or a red "not sent". The tile's corner light then follows the
+  run. Dropping outside every tile tells you nothing was sent.
+
+**Local runs are always confirmed.** The module prompt is never executed as a
+shell command. Only a command you type into the confirmation dialog is run
+(with `/bin/zsh`), and only after you confirm it.
+
+### Deadlines and the DDL energy bar
+
+- There is **one** energy bar above the quick actions. Every unfinished deadline
+  is a cell inside that bar rather than a bar of its own.
+- The bar's color follows how many cells it holds: **3 or fewer is green, 4 to 6
+  is orange, 7 or more is red**.
+- Each cell drains from the moment it was added until it is due (the drain
+  window is clamped between 1 hour and 14 days).
+- Hover the bar to expand the list: click an entry to edit it, click the circle
+  to mark it done, click × to delete it, or clear all completed entries at once.
+- Add a deadline by typing in the field below the list, for example
+  「周五 18:00 交实验报告」 ("Fri 18:00 hand in lab report"), 「明天下午3点 组会」
+  ("tomorrow 3 pm group meeting"), or 「3小时后 开会」 ("meeting in 3 hours").
+  The parser shows what it recognized, and you can adjust the date and time with
+  the date picker.
+- Supported expressions include today / tomorrow / the day after, weekdays and
+  "next" weekdays, month/day dates, relative offsets ("in N days / hours /
+  minutes"), and clock times with morning / afternoon / evening words. A date
+  without a time defaults to 23:59; a time without a date means today, or
+  tomorrow if that time has already passed.
+
+### Ask Grok via Cursor Cloud Agents
+
+Grok answers come from a Grok model running as a **Cursor Cloud Agent that is not
+attached to any repository**. For every Grok request the app:
+
+1. Creates an agent with `POST /v1/agents` on the Cursor API, using your Grok
+   model ID (or the first Grok model listed by `/v1/models` if you left it
+   empty).
+2. Polls the run until it finishes (up to 20 minutes) and shows progress on the
+   island.
+3. Shows the Markdown answer on the island, where you can copy it or open the
+   Cloud Agent in Cursor to keep the conversation going. Cancelling a run on the
+   island also cancels the cloud run.
+
+What gets sent:
+
+- Up to 5 images (PNG, JPEG, GIF, WebP, 15 MB each) are attached as images.
+- UTF-8 text files up to 120 KB are inlined into the prompt.
+- Links are passed as URLs. Folders are mentioned by name only, since the agent
+  cannot see your disk.
+- The prompt tells the agent this is a Q&A: it must not modify repositories or
+  open branches or pull requests.
+
+**Quick actions.** The expanded island has three buttons — 整理错题 (organize
+mistakes into a review sheet), 解答题目 (solve the problems on screen), and
+检查代码 (review the code on screen) — plus a free-form **问 Grok** ("Ask Grok")
+field. Each one:
+
+- Captures a screenshot of the frontmost window (never the island itself).
+- If the frontmost app is a supported browser (Safari, Chrome, Edge, Brave, Arc,
+  Vivaldi, Opera), also reads the current tab's URL.
+- Sends both to Grok with a task-specific prompt.
+
+### Cursor agent and PR status lights
+
+- The island polls your **Cursor Cloud Agents** (`GET /v1/agents`) and the
+  **open pull requests** of a configured repository, every 20 seconds while
+  something is running and every 60 seconds when idle.
+- Every island run (Grok or Local), active Cloud Agent, and open PR gets its own
+  light. Queued and running tasks breathe, finished tasks turn green, failed
+  tasks turn red, and recently finished tasks stay visible for about 90 seconds.
+  The header status dot turns orange when a PR's CI is failing.
+- The island border blinks when a task starts or finishes.
+- Click a light to see the list. Island runs open their result; Cloud Agents and
+  PRs open in the browser.
+- Pull requests are read with the locally signed-in `origin` CLI (looked up in `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`).
+  PRs whose changes are already fully in `main` are not counted.
+
+### Run records
+
+- The **运行记录** ("Run records") page lists every run, with a filter to show
+  only Grok answers.
+- **清理已完成** ("Clear finished") removes all succeeded, failed, and cancelled
+  records in one click. **选择** ("Select") enables multi-select delete; each row
+  also has a trash button and a context menu. Deleting a running record cancels
+  it first.
+- Records persist across restarts, so Grok answers are still there after you
+  reopen the app. Runs that were still in progress when the app quit are marked
+  as interrupted.
+- The "上次：…" ("Last: …") line on the home view reopens the most recent Grok
+  answer.
+
+---
+
+## Requirements
+
+- macOS 14 (Sonoma) or later
+- Xcode 15 or later
+- For Grok answers and Cloud Agent status: a Cursor account and a Cursor API key
+- Optional, for PR status: the `origin` CLI installed and signed in
+
+---
+
+## Build and run with Xcode
+
+1. Clone the repository and open the project at the repository root:
+
+   ```bash
+   git clone <repository-url> GrokIsland
+   cd GrokIsland
+   open GrokIsland.xcodeproj
+   ```
+
+   Finder shows `GrokIsland.xcodeproj` as a single file. If the project file is
+   missing (for example, you only have the sources), regenerate it first:
+
+   ```bash
+   ./scripts/bootstrap-xcodeproj.sh
+   ```
+
+2. Select the **GrokIsland** scheme with **My Mac** as the destination and press
+   **Run** (⌘R).
+
+To build from the command line instead:
 
 ```bash
 xcodebuild -scheme GrokIsland -configuration Debug -destination 'platform=macOS' build
 ```
 
-核心逻辑的单测（不启动 UI）：
+### Desktop shortcut
+
+To launch the app without Xcode, click the shortcut button in the island header,
+or run this on your Mac:
 
 ```bash
-swift test
+./scripts/make-desktop-shortcut.sh
 ```
 
-**面板：** 默认上提成细条；只有鼠标碰到这条细边框才会滑下来。移开约 0.5 秒后自动上提。确认 Local 运行或点「钉住」时不会收起。
-
-**桌面快捷方式：** 展开后面板标题栏的方块箭头按钮，或在仓库根目录执行 `./scripts/make-desktop-shortcut.sh`。桌面会出现「grok岛」。
-
-**试用后端：**
-
-- 点 **新建模块** 建一个模块（名称 + 提示词 + Grok Bot / Local）。空列表文案：创建你的第一个功能模块。
-- 或点 **载入示例** 载入三个演示模块（仅当列表为空）。
-- 点方块进入编辑 / 删除。
-- 把文件 / 文件夹 / 链接**拖到某个模块方块上**，即用该模块执行（`IslandEngine.ingestDropProviders(_:assignTo:)`）。
-- Local 模块会先确认：提示词不会当 shell；只有确认框里填写的命令才会执行。
-- Grok Bot 模块通过 Cursor Cloud Agents API 开一个不绑仓库的 Agent，用 Grok 模型作答。拖进来的图片会作为图片附上，小文本文件会内联进提示词。
-
-模块保存在：
-
-`~/Library/Application Support/GrokIsland/function-modules.json`
-
-**设置（齿轮）：** 填 Cursor API key（[cursor.com/dashboard/api](https://cursor.com/dashboard/api)）。key 只存在本机 `~/Library/Application Support/GrokIsland/cursor-api-key`（权限 600）。Grok 模型 ID 留空时，会从 `/v1/models` 自动选一个 Grok 模型。
-
-**状态灯（PR / Cloud Agent）：** 细条和标题栏左侧的圆点。
-
-- 有 Cloud Agent 在跑（`GET /v1/agents` 里的 `ACTIVE`）、有待合并的 PR，或者岛上有 Grok 任务在跑时，圆点会呼吸闪烁；PR 的 CI 失败时变橙色。
-- 有任务开始或结束时，岛的边框闪两下。
-- 点圆点可以看列表，点某一行会打开对应页面。
-- PR 通过本机已登录的 `origin` CLI 读取（默认仓库 `leowang142857/GrokIsland`，可在设置里改）。内容已经全部并入 `main` 的 PR 不计入。
-
-**展开后的分层：** 从上到下依次是 任务状态灯 → DDL 能量条 → 三个功能条 + 问 Grok → 功能模块 / 运行记录。收起时只剩一条细条：左边每个任务一颗灯，右边是最急的 DDL 倒计时（带刘海的屏幕上会分在刘海两侧）。
-
-**每个任务一颗灯：** 岛上的 Grok / 本地运行、Cloud Agent、PR 各自一颗灯。排队 / 运行中会呼吸，完成是绿色、失败是红色，刚结束的任务会保留约 90 秒。展开后状态层是一排可点的小胶囊：点岛上的任务打开结果，点 Agent / PR 打开对应网页。
-
-**DDL 能量条：** 三条功能条上面只有一条能量条。每个未完成的任务是里面的一格，不会各自再长一条。整条的颜色看格子数量：3 个及以内是绿色，4 到 6 个是橙色，7 个及以上是红色。鼠标悬停会展开列表（点击修改、圆圈标记完成、× 删除），下面可以直接输入，比如「周五 18:00 交实验报告」「明天下午3点 组会」「3小时后 开会」，会自动识别时间，也可以用日期框手动改。保存在 `Application Support/GrokIsland/deadlines.json`。
-
-**运行记录：** 「运行记录」页里可以只看 Grok 回答；「清理已完成」一键清掉所有已完成 / 失败 / 已取消的记录；「选择」后可以多选删除，也可以用每行右侧的垃圾桶或右键菜单删单条（删除运行中的记录会先取消）。记录保存在 `Application Support/GrokIsland/run-journal.json`，重开 app 后问 Grok 的结果还在；退出时还没跑完的会标成「已中断」。主页的「上次：…」一行可以一键重新打开最近一次 Grok 回答。
-
-**拖放反馈：** 拖着文件 / 链接经过岛时，模块区上方会提示「松手发送到「翻译」→ Grok 解答」；悬停的模块方块会放大并显示「松手发给 Grok / 松手本机执行」。松手后方块先显示「读取中…」，然后绿色「已发送 N 项」或红色「没发出去」，之后方块角上的小灯跟着这次运行变化。没放到任何模块上会提示「这次没有发送」。
-
-**Grok 快捷按钮：** 整理错题、解答题目、检查代码，外加一个「问 Grok」输入框。
-
-- 点按钮时，会截当前最前面的窗口（不会截到岛本身）；如果前台是 Safari、Chrome、Arc、Edge 等浏览器，还会带上当前网址，一起交给 Grok。
-- 结果显示在岛上，可以拷贝，也可以跳到 Cursor 的 Cloud Agent 页面继续追问。
-- 第一次使用时，macOS 会要求开启屏幕录制权限（开启后要重开 app）；读取浏览器网址时会请求自动化权限。
+Both copy the app to `~/Applications/grok岛.app` and put a Finder alias named
+`grok岛` on your Desktop. The script also builds the Debug app first.
 
 ---
 
-## Open / build / run (English)
+## Configuration
 
-This started as a cloud new-project session. Create a repo with the **Create repo** pill, clone **that** repo to your Mac, then open `GrokIsland.xcodeproj` at the repo root (Finder shows it as a single file). If you only have sources:
+Open the settings pane with the **gear** button on the island.
 
-```bash
-./scripts/bootstrap-xcodeproj.sh
-open GrokIsland.xcodeproj
-```
+| Setting | Purpose |
+| --- | --- |
+| **Cursor API key** | Used to ask Grok and to read Cloud Agent status. Create one at [cursor.com/dashboard/api](https://cursor.com/dashboard/api), paste it in, and click Save. You can clear it at any time. |
+| **Grok model ID** | Leave empty to automatically pick a Grok model from `/v1/models`, or enter a specific model ID. |
+| **PR repository** | The `owner/name` repository whose open PRs drive the PR lights. Defaults to `leowang142857/GrokIsland`. |
+| **Screen Recording** | Shows whether the permission is granted, with a shortcut to System Settings. |
 
-1. Xcode 15+ on macOS 14+.
-2. `open GrokIsland.xcodeproj` or the `xcodebuild` command above.
-3. Run the **GrokIsland** scheme.
-
-**Exercise the backend:** create or load demo modules → drop files onto the panel → select a module → run. Local execution requires explicit confirmation. Grok Bot is a stub with a documented hook for later wiring.
-
----
-
-## Linux / Cloud Agent (headless core)
-
-The SwiftUI + AppKit app only builds on macOS with Xcode, but the `GrokIslandCore`
-package (module CRUD, drop intake, run state machine, executors) is
-platform-agnostic and its XCTest suite runs on Linux. `Combine` is Apple-only, so
-on non-Apple platforms the core transparently uses
-[`OpenCombine`](https://github.com/OpenCombine/OpenCombine) for
-`ObservableObject`/`@Published` (guarded by `#if canImport(Combine)`; macOS keeps
-using real Combine). With a Swift 6 toolchain installed:
-
-```bash
-swift build            # builds GrokIslandCore
-swift test             # runs the full core test suite
-```
-
-A Cloud Agent environment is defined under `.cursor/` (`environment.json` +
-`Dockerfile`, based on the official `swift:6.0.3-noble` image) so agents can build
-and test the core headlessly.
+Without an API key, modules, deadlines, and Local runs still work; Grok requests
+fail with a prompt to add a key, and the Cloud Agent section shows that no key
+is set.
 
 ---
 
-## Public API (call these from UI)
+## Privacy, permissions, and secrets
 
-The thin UI should talk to **`IslandEngine`** (see `IslandEngineAPI`). Services underneath are independently usable and testable.
+- **No secrets live in this repository.** The app never ships with an API key.
+  Your Cursor API key is entered at runtime and stored only on your Mac, in
+  `~/Library/Application Support/GrokIsland/cursor-api-key` with `0600`
+  permissions. It is sent only to `api.cursor.com` as a bearer token.
+- The key is stored in a file rather than the login Keychain because ad-hoc
+  signed development builds get a new code identity on every rebuild, which
+  would trigger a Keychain prompt each time.
+- Please do not commit API keys, tokens, or personal data files. If you fork the
+  project, keep credentials out of source, build settings, and test fixtures.
+- **Screen Recording** is requested the first time you use a quick action, so the
+  app can capture the frontmost window. Restart the app after granting it.
+- **Automation (Apple Events)** is requested the first time the app reads a
+  browser's current URL.
+- Accessibility and Input Monitoring are **not** requested.
+- The app is not sandboxed and uses the outgoing network client entitlement.
+- Content you send to Grok (screenshots, URLs, inlined files, your prompt) goes
+  to Cursor's Cloud Agents API and appears as a Cloud Agent in your Cursor
+  account.
+
+---
+
+## Where data is stored
+
+Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
+
+| File | Contents |
+| --- | --- |
+| `function-modules.json` | Your modules |
+| `deadlines.json` | Your deadlines |
+| `run-journal.json` | Run records, including Grok answers |
+| `cursor-api-key` | Your Cursor API key (`0600`) |
+
+The Grok model ID and PR repository are stored in the app's user defaults.
+
+---
+
+## Headless core and tests (macOS or Linux)
+
+The app itself needs macOS and Xcode, but the `GrokIslandCore` package — module
+storage, drop intake, the run state machine, executors, the Cursor API client,
+deadline parsing, and activity monitoring — builds without a UI. Its XCTest
+suite runs on macOS and on Linux.
+
+```bash
+swift build   # builds GrokIslandCore
+swift test    # runs the core test suite
+```
+
+`Combine` is Apple-only, so on other platforms the core uses
+[OpenCombine](https://github.com/OpenCombine/OpenCombine) for
+`ObservableObject` and `@Published` (guarded by `#if canImport(Combine)`); macOS
+keeps using Combine.
+
+A Cursor Cloud Agent environment is defined in `.cursor/` (`environment.json`
+plus a `Dockerfile` based on the official `swift:6.0.3-noble` image), so agents
+can build and test the core headlessly.
+
+---
+
+## Architecture
+
+The UI talks to a single facade, **`IslandEngine`** (its surface is described by
+the `IslandEngineAPI` protocol). The services underneath can be used and tested
+on their own.
 
 | Type | Role |
 | --- | --- |
-| `IslandEngine` | Facade: module CRUD, inbox intake, assign/run/confirm/cancel, quick ask |
-| `ModuleStore` | JSON persistence + CRUD / rename for `FunctionModule` |
-| `ResourceInbox` | In-memory references to dropped files / folders / URLs |
-| `ResourceIntake` | Pasteboard / URL → `ResourceItem` metadata (no file copies) |
-| `ExecutionRouter` | Grok vs Local dispatch + run tasks |
-| `RunJournal` | Run state machine + progress / notifications, optional JSON persistence |
-| `TaskLightBoard` | Per-task lights from runs + Cloud Agent / PR snapshot |
-| `DeadlineStore` / `DeadlineParser` | DDL list persistence, free-text due-date parsing, energy / urgency |
-| `LocalExecutor` | Open files and/or a *confirmed* zsh command |
-| `GrokBotExecutor` | Forwards to a `GrokBotClient` (demo stub by default) |
+| `IslandEngine` | Facade: module CRUD, drop intake, run / confirm / cancel, Grok quick actions, record cleanup |
+| `ModuleStore` | JSON persistence and CRUD for `FunctionModule` |
+| `ResourceInbox` / `ResourceIntake` | Dropped files, folders, and URLs as references (no file copies) |
+| `ExecutionRouter` | Dispatches runs to the Grok Bot or Local executor |
+| `RunJournal` | Run state machine, progress, and optional JSON persistence |
+| `LocalExecutor` | Opens files and runs a *confirmed* shell command |
+| `GrokBotExecutor` / `GrokBotClient` | Grok executor facade; the app injects `CursorAgentGrokClient` |
+| `CursorCloudAPI` / `CursorAgentGrokClient` | Minimal Cursor Cloud Agents API v1 client, and the Grok client built on it |
+| `CloudActivityMonitor` | Polls Cloud Agents (Cursor API) and open PRs (`origin` CLI) |
+| `TaskLightBoard` | One light per run, Cloud Agent, and PR |
+| `DeadlineStore` / `DeadlineParser` | Deadline persistence, free-text due-date parsing, energy and urgency |
+| `IslandSettings` / `IslandSettingsStorage` | API key file, Grok model ID, PR repository |
 
-### Typical UI calls
+### Typical calls
 
 ```swift
-try engine.createModule(name: "翻译", prompt: "译成中文", executor: .grokBot)
-engine.ingestDroppedURLs(urls)                 // or ingestDropProviders(_:)
-try engine.assignInbox(to: moduleID)           // requires inbox items
+try engine.createModule(name: "Translate", prompt: "Translate into English", executor: .grokBot)
+engine.ingestDroppedURLs(urls)                  // or ingestDropProviders(_:assignTo:completion:)
+try engine.assignInbox(to: moduleID)            // requires at least one dropped item
 try engine.confirmPendingLocal(openAttachedFiles: true, shellCommand: "")
-try engine.quickAskGrok("总结这些材料")
+try engine.quickAskGrok("Summarize these materials")
 engine.cancelRun(id: runID)
-engine.clearFinishedRuns()                     // one-click cleanup, returns count
-engine.deleteRuns(ids: selectedIDs)            // cancels active ones first
+engine.clearFinishedRuns()                      // returns the number removed
+engine.deleteRuns(ids: selectedIDs)             // cancels active runs first
 ```
 
 ### Run state machine
 
 `queued` → (`awaitingConfirmation` for Local) → `running` → `succeeded` | `failed` | `cancelled`
 
-Terminal phases are sticky (a cancelled run cannot be overwritten by a late success).
+Terminal phases are sticky: a cancelled run cannot be overwritten by a late
+success.
 
 ### Models
 
-- `FunctionModule` — user-created function (name, prompt/config, `ExecutorKind`)
-- `ResourceItem` — reference only (`location`, kind, optional UTI / size / bookmark)
-- `ExecutorKind` — `grokBot` | `local`
-- `RunRecord` / `RunPhase` — notification + progress
-- `IslandState` — reserved for a future island frontend
+- `FunctionModule` — a user-created module (name, prompt, `ExecutorKind`)
+- `ResourceItem` — a reference only (location, kind, optional UTI / size / bookmark)
+- `ExecutorKind` — `grokBot` or `local`
+- `RunRecord` / `RunPhase` — progress and result of one run
+- `DeadlineItem` — one deadline entry
 
-### Grok Bot wiring (later)
-
-See `GrokBotExecutor.swift`:
-
-- Inject a `GrokBotClient` (demo: `DemoGrokBotClient`, unused HTTP: `HTTPGrokBotClient`)
-- Wire payload: `ExecutionRequest.grokWirePayload()` (`GrokBotWireRequest`)
-- URL scheme: `grok-island://run?module=…`
-- HTTP placeholder: `http://127.0.0.1:8787/v1/run`
-- Do **not** add API keys in this target.
-
-### Frontend TODOs
-
-`IslandPanel.swift` and `ShellView.swift` are marked `TODO(frontend)`. Replace the shell with the island UI; keep calling `IslandEngine`.
-
-Accessibility / Input Monitoring is **not** requested. Standard drop onto the panel is enough.
+The app registers the `grok-island://` URL scheme, which is reserved for future
+callbacks. Files opened with the app are added to the drop inbox.
 
 ---
 
-## Layout
+## Project layout
 
 ```
-GrokIsland.xcodeproj          # app (open this)
-Package.swift                 # GrokIslandCore + tests
+GrokIsland.xcodeproj          # macOS app project (open this)
+Package.swift                 # GrokIslandCore library + tests
 GrokIsland/
-  GrokIslandApp.swift         # @main + AppDelegate
-  IslandPanel.swift           # NSPanel host (thin)
-  ShellView.swift             # functional shell
-  Models.swift
-  RunModels.swift
-  ModuleStore.swift
-  ResourceInbox.swift
-  ResourceIntake.swift
-  ExecutorProtocol.swift
-  LocalExecutor.swift
-  GrokBotExecutor.swift
-  RunJournal.swift            # run records (persisted in the app)
-  ExecutionRouter.swift
-  IslandEngine.swift
-  TaskLights.swift            # one status light per run / Cloud Agent / PR
-  Deadlines.swift             # DDL store, parser, energy
-  ActivityViews.swift         # status lights, activity list
+  GrokIslandApp.swift         # @main and AppDelegate
+  IslandPanel.swift           # NSPanel host, hover reveal / retract, peek strip
+  IslandChrome.swift          # glass backdrop, colors, animations
+  ShellView.swift             # expanded island: header, layers, module grid
+  ActivityViews.swift         # task lights and activity list
   DeadlineViews.swift         # DDL energy bar
-  RecordViews.swift           # run records list (clear / multi-select delete)
-  GrokViews.swift             # function strips, run detail, settings
-Tests/GrokIslandCoreTests/
+  GrokViews.swift             # quick actions, run detail, settings pane
+  RecordViews.swift           # run records (filter, clear, multi-select delete)
+  PageCapture.swift           # frontmost-window screenshot and browser URL
+  DesktopShortcut.swift       # ~/Applications copy + Desktop alias
+  IslandEngine.swift          # facade used by the UI
+  Models.swift, RunModels.swift
+  ModuleStore.swift, ResourceInbox.swift, ResourceIntake.swift
+  ExecutorProtocol.swift, ExecutionRouter.swift
+  LocalExecutor.swift, GrokBotExecutor.swift
+  CursorCloudAPI.swift        # Cursor Cloud Agents API + Grok client
+  CloudActivity.swift         # Cloud Agent / PR polling via origin CLI
+  GrokQuickActions.swift      # quick-action prompts
+  RunJournal.swift            # persisted run records
+  TaskLights.swift            # per-task lights
+  Deadlines.swift             # deadline store, parser, energy
+  IslandSettings.swift        # API key file and preferences
+Tests/GrokIslandCoreTests/    # XCTest suite for GrokIslandCore
+scripts/
+  bootstrap-xcodeproj.sh      # regenerate GrokIsland.xcodeproj
+  make-desktop-shortcut.sh    # build and add a Desktop alias
+  generate-app-icon.py        # app icon generator
+.cursor/                      # Cloud Agent environment (Linux, headless core)
 ```
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+- Keep UI code thin and put logic in `GrokIslandCore` so it stays testable.
+- Run `swift test` before opening a pull request, and build the app in Xcode if
+  you touched UI files.
+- If you add a Swift file to the app, add it to `GrokIsland.xcodeproj` and to
+  `scripts/bootstrap-xcodeproj.sh`. If it depends on AppKit or SwiftUI, also add
+  it to the `exclude` list in `Package.swift`.
+- Never commit API keys or other credentials.
+
+No license file has been added yet.
