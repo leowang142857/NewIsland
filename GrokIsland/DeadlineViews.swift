@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 extension DeadlineUrgency {
@@ -88,11 +89,18 @@ struct DeadlineBadge: View {
 
 /// One DDL energy strip above the function strips. Each task is one cell in that bar.
 /// Hovering (or typing into it) expands the list and the add / edit field.
+///
+/// The time control is the last row. A click or drag that slips a few points below
+/// it used to leave this card's hover region, collapse the editor, and land on the
+/// Ask Grok bar underneath. `DeadlineTimeHit` keeps that strip with the time control.
 struct DeadlineEnergyBar: View {
     @ObservedObject var store: DeadlineStore
     var onError: (Error) -> Void = { _ in }
 
-    @State private var hovering = false
+    @State private var cardHover = false
+    @State private var pointerOwnsPanel = false
+    @State private var timeTracking = false
+    @State private var hitSession = DeadlineHitSession()
     @State private var draft = ""
     @State private var draftDue = defaultDeadlineDue()
     @State private var editingID: UUID?
@@ -102,15 +110,30 @@ struct DeadlineEnergyBar: View {
     private static let visibleRows = 4
 
     private var expanded: Bool {
-        hovering || fieldFocused || !draft.isEmpty || editingID != nil
+        DeadlineTimeHit.staysOpen(
+            cardHover: cardHover,
+            pointerOwnsPanel: pointerOwnsPanel,
+            tracking: timeTracking,
+            fieldFocused: fieldFocused,
+            hasDraft: !draft.isEmpty,
+            isEditing: editingID != nil
+        )
     }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             card(now: context.date)
         }
+        .background(DeadlinePanelProbe(session: hitSession).allowsHitTesting(false))
         .onHover { inside in
-            withAnimation(IslandChrome.expandSpring) { hovering = inside }
+            let interaction = hitSession.evaluate(phase: .hover, point: NSEvent.mouseLocation)
+            hitSession.tracking = interaction.tracking
+            hitSession.pointerOwnsPanel = interaction.pointerOwnsPanel
+            withAnimation(IslandChrome.expandSpring) {
+                cardHover = inside
+                pointerOwnsPanel = interaction.pointerOwnsPanel
+                timeTracking = interaction.tracking
+            }
         }
         .onChange(of: draft) { applyParse() }
         .animation(IslandChrome.expandSpring, value: expanded)
@@ -234,6 +257,14 @@ struct DeadlineEnergyBar: View {
                     .labelsHidden()
                     .datePickerStyle(.field)
                     .controlSize(.small)
+                    .background(
+                        DeadlineTimeAnchor(
+                            session: hitSession,
+                            pointerOwnsPanel: $pointerOwnsPanel,
+                            timeTracking: $timeTracking
+                        )
+                        .allowsHitTesting(false)
+                    )
                 if let parsedHint {
                     Text("识别：\(parsedHint)")
                         .font(.caption2)
@@ -347,5 +378,274 @@ private struct DeadlineRow: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isEditing ? IslandChrome.neonCyan.opacity(0.14) : Color.white.opacity(0.03))
         }
+    }
+}
+
+/// Screen rects for the DDL card and its time field, plus the mouse monitor that
+/// keeps a downward slip from dismissing the editor or hitting Ask Grok.
+final class DeadlineHitSession {
+    var tracking = false
+    var pointerOwnsPanel = false
+    var panelScreenRect: CGRect = .zero
+    var timeScreenRect: CGRect = .zero
+    weak var panelView: NSView?
+    weak var anchor: DeadlineTimeAnchorView?
+    var onInteraction: ((DeadlineTimeInteraction) -> Void)?
+
+    private var monitor: Any?
+    private var timer: Timer?
+    private var delivering = false
+    private weak var datePicker: NSDatePicker?
+
+    func evaluate(phase: DeadlinePointerPhase, point: CGPoint) -> DeadlineTimeInteraction {
+        refreshFrames()
+        return DeadlineTimeHit.decide(
+            phase: phase,
+            point: point,
+            panel: panelScreenRect,
+            timeField: timeScreenRect,
+            tracking: tracking,
+            attachedPopup: hasAttachedPopup()
+        )
+    }
+
+    func apply(_ interaction: DeadlineTimeInteraction) {
+        let changed = tracking != interaction.tracking || pointerOwnsPanel != interaction.pointerOwnsPanel
+        tracking = interaction.tracking
+        pointerOwnsPanel = interaction.pointerOwnsPanel
+        if changed { onInteraction?(interaction) }
+    }
+
+    func start(anchor: DeadlineTimeAnchorView) {
+        self.anchor = anchor
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            self?.handle(event) ?? event
+        }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func anchorWentAway(_ anchor: DeadlineTimeAnchorView) {
+        guard self.anchor === anchor else { return }
+        self.anchor = nil
+        timeScreenRect = .zero
+        datePicker = nil
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func poll() {
+        guard !delivering else { return }
+        var interaction = evaluate(phase: .hover, point: NSEvent.mouseLocation)
+        // A missed mouse-up (released outside the app) must not pin the editor open.
+        if interaction.tracking, NSEvent.pressedMouseButtons & 1 == 0 {
+            interaction.tracking = false
+        }
+        apply(interaction)
+    }
+
+    private func handle(_ event: NSEvent) -> NSEvent? {
+        guard !delivering else { return event }
+        let phase: DeadlinePointerPhase
+        switch event.type {
+        case .leftMouseDown: phase = .mouseDown
+        case .leftMouseDragged: phase = .mouseDragged
+        case .leftMouseUp: phase = .mouseUp
+        default: return event
+        }
+        let inOurWindow = event.window != nil && event.window === panelView?.window
+        let popup = hasAttachedPopup()
+        guard inOurWindow || popup else { return event }
+
+        var interaction = evaluate(phase: phase, point: screenPoint(of: event))
+        if !inOurWindow || popup {
+            interaction.absorbPointer = false
+            if popup { interaction.pointerOwnsPanel = true }
+        }
+        apply(interaction)
+        guard interaction.absorbPointer else { return event }
+
+        delivering = true
+        retargetMouseDown(event)
+        delivering = false
+        if NSEvent.pressedMouseButtons & 1 == 0 {
+            apply(evaluate(phase: .mouseUp, point: NSEvent.mouseLocation))
+        }
+        return nil
+    }
+
+    /// The calendar editor is a child window. Crossing into it is not leaving the DDL card.
+    private func hasAttachedPopup() -> Bool {
+        guard let window = panelView?.window else { return false }
+        return window.childWindows?.contains(where: \.isVisible) == true
+    }
+
+    private func refreshFrames() {
+        if let panelView, let rect = Self.screenRect(of: panelView) {
+            panelScreenRect = rect
+        }
+        let source = resolveDatePicker() ?? anchor
+        if let source, let rect = Self.screenRect(of: source) {
+            timeScreenRect = rect
+        }
+    }
+
+    private func resolveDatePicker() -> NSDatePicker? {
+        if let datePicker, datePicker.window != nil { return datePicker }
+        guard let anchor else { return nil }
+        let picker = anchor.findDatePicker()
+        datePicker = picker
+        return picker
+    }
+
+    /// Move a slop click onto the time field so the picker, not the bar below, receives it.
+    private func retargetMouseDown(_ event: NSEvent) {
+        guard let picker = resolveDatePicker(), let window = picker.window else { return }
+        let local = picker.convert(event.locationInWindow, from: nil)
+        let x = min(max(local.x, picker.bounds.minX + 2), picker.bounds.maxX - 2)
+        let inside = picker.convert(NSPoint(x: x, y: picker.bounds.midY), to: nil)
+        guard let retargeted = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: inside,
+            modifierFlags: event.modifierFlags,
+            timestamp: event.timestamp,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: event.eventNumber,
+            clickCount: event.clickCount,
+            pressure: event.pressure
+        ) else { return }
+        picker.mouseDown(with: retargeted)
+    }
+
+    private func screenPoint(of event: NSEvent) -> CGPoint {
+        if let window = event.window {
+            return window.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero)).origin
+        }
+        return NSEvent.mouseLocation
+    }
+
+    fileprivate static func screenRect(of view: NSView) -> CGRect? {
+        guard let window = view.window, view.bounds.width > 1, view.bounds.height > 1 else { return nil }
+        return window.convertToScreen(view.convert(view.bounds, to: nil))
+    }
+}
+
+private struct DeadlinePanelProbe: NSViewRepresentable {
+    var session: DeadlineHitSession
+
+    func makeNSView(context: Context) -> DeadlinePanelProbeView {
+        let view = DeadlinePanelProbeView()
+        view.session = session
+        return view
+    }
+
+    func updateNSView(_ view: DeadlinePanelProbeView, context: Context) {
+        view.session = session
+        view.publish()
+    }
+}
+
+private final class DeadlinePanelProbeView: NSView {
+    var session: DeadlineHitSession?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        publish()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            if session?.panelView === self { session?.panelView = nil }
+        } else {
+            session?.panelView = self
+            publish()
+        }
+    }
+
+    func publish() {
+        guard let session, let rect = DeadlineHitSession.screenRect(of: self) else { return }
+        session.panelView = self
+        session.panelScreenRect = rect
+    }
+}
+
+private struct DeadlineTimeAnchor: NSViewRepresentable {
+    var session: DeadlineHitSession
+    @Binding var pointerOwnsPanel: Bool
+    @Binding var timeTracking: Bool
+
+    func makeNSView(context: Context) -> DeadlineTimeAnchorView {
+        let view = DeadlineTimeAnchorView()
+        view.session = session
+        return view
+    }
+
+    func updateNSView(_ view: DeadlineTimeAnchorView, context: Context) {
+        view.session = session
+        let owns = $pointerOwnsPanel
+        let tracking = $timeTracking
+        session.onInteraction = { interaction in
+            if owns.wrappedValue != interaction.pointerOwnsPanel {
+                owns.wrappedValue = interaction.pointerOwnsPanel
+            }
+            if tracking.wrappedValue != interaction.tracking {
+                tracking.wrappedValue = interaction.tracking
+            }
+        }
+        session.start(anchor: view)
+        session.anchor = view
+    }
+
+    static func dismantleNSView(_ nsView: DeadlineTimeAnchorView, coordinator: ()) {
+        nsView.session?.anchorWentAway(nsView)
+    }
+}
+
+final class DeadlineTimeAnchorView: NSView {
+    var session: DeadlineHitSession?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        guard let session, let rect = DeadlineHitSession.screenRect(of: findDatePicker() ?? self) else { return }
+        session.timeScreenRect = rect
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let session, window != nil {
+            session.start(anchor: self)
+        } else if let session {
+            session.anchorWentAway(self)
+        }
+    }
+
+    func findDatePicker() -> NSDatePicker? {
+        guard let root = window?.contentView else { return nil }
+        return Self.firstDatePicker(in: root, depth: 40)
+    }
+
+    private static func firstDatePicker(in view: NSView, depth: Int) -> NSDatePicker? {
+        if let picker = view as? NSDatePicker { return picker }
+        guard depth > 0 else { return nil }
+        for subview in view.subviews {
+            if let picker = firstDatePicker(in: subview, depth: depth - 1) { return picker }
+        }
+        return nil
     }
 }
