@@ -109,6 +109,21 @@ struct IslandSettingsStorage: Sendable {
         }
     }
 
+    /// The three expanded-island shortcut buttons. Missing or corrupt data is the built-in trio.
+    var islandShortcutButtons: IslandShortcutButtons {
+        get {
+            guard let data = defaults.data(forKey: "islandShortcutButtons"),
+                  !data.isEmpty,
+                  let buttons = try? JSONDecoder().decode(IslandShortcutButtons.self, from: data)
+            else { return .default }
+            return buttons.sanitized()
+        }
+        nonmutating set {
+            let data = try? JSONEncoder().encode(newValue.sanitized())
+            defaults.set(data, forKey: "islandShortcutButtons")
+        }
+    }
+
     /// The copied image for `style`, or nil when it has none or the file is gone.
     func backgroundImageURL(for style: IslandBackgroundStyle) -> URL? {
         guard let name = style.imageFileName, IslandBackgroundStyle.isPlainFileName(name) else { return nil }
@@ -164,6 +179,12 @@ final class IslandSettings: ObservableObject {
             storage.islandBackground = background
         }
     }
+    @Published var shortcutButtons: IslandShortcutButtons {
+        didSet {
+            guard shortcutButtons != oldValue else { return }
+            storage.islandShortcutButtons = shortcutButtons
+        }
+    }
     @Published var isPeekLocked: Bool {
         didSet { storage.isPeekLocked = isPeekLocked }
     }
@@ -174,6 +195,7 @@ final class IslandSettings: ObservableObject {
         prRepo = storage.prRepo
         grokModelID = storage.grokModelID
         background = storage.islandBackground
+        shortcutButtons = storage.islandShortcutButtons
         isPeekLocked = storage.isPeekLocked
     }
 

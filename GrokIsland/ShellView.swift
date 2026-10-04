@@ -251,7 +251,7 @@ struct ShellView: View {
                 engine.reportError(error)
             }
 
-            GrokQuickBar(engine: engine) { id in route = .run(id) }
+            GrokQuickBar(engine: engine, settings: settings) { id in route = .run(id) }
             lastAnswerStrip
 
             layerRule

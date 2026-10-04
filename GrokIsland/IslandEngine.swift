@@ -38,6 +38,7 @@ protocol IslandEngineAPI: AnyObject {
     func cancelRun(id: UUID)
     func quickAskGrok(_ text: String) throws -> RunRecord
     func runQuickAction(_ action: GrokQuickAction, page: PageSnapshot, question: String?) throws -> RunRecord
+    func runShortcut(title: String, prompt: String, page: PageSnapshot, question: String?) throws -> RunRecord
     func clearFinishedRuns() -> Int
     func deleteRuns(ids: Set<UUID>) -> Int
 }
@@ -49,7 +50,7 @@ protocol IslandEngineAPI: AnyObject {
 ///     removeInboxItem / clearInbox
 ///     assignInbox(to:) / runModule
 ///     confirmPendingLocal / cancelPendingLocal / cancelRun
-///     quickAskGrok / runQuickAction
+///     quickAskGrok / runQuickAction / runShortcut
 ///     clearFinishedRuns / deleteRuns
 @MainActor
 final class IslandEngine: ObservableObject, IslandEngineAPI {
@@ -294,9 +295,45 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
         page: PageSnapshot,
         question: String? = nil
     ) throws -> RunRecord {
+        try runPagePrompt(
+            title: action.title,
+            prompt: action.prompt,
+            page: page,
+            question: question,
+            origin: action == .askAboutPage ? .quickAsk : .quickAction,
+            requireQuestion: action == .askAboutPage
+        )
+    }
+
+    /// Sends the captured frontmost page to Grok for one shortcut button, built-in or custom.
+    @discardableResult
+    func runShortcut(
+        title: String,
+        prompt: String,
+        page: PageSnapshot,
+        question: String? = nil
+    ) throws -> RunRecord {
+        try runPagePrompt(
+            title: title,
+            prompt: prompt,
+            page: page,
+            question: question,
+            origin: .quickAction,
+            requireQuestion: false
+        )
+    }
+
+    private func runPagePrompt(
+        title: String,
+        prompt: String,
+        page: PageSnapshot,
+        question: String?,
+        origin: RunOrigin,
+        requireQuestion: Bool
+    ) throws -> RunRecord {
         lastError = nil
         let question = question?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if action == .askAboutPage, question.isEmpty {
+        if requireQuestion, question.isEmpty {
             lastError = IslandError.emptyInput.localizedDescription
             throw IslandError.emptyInput
         }
@@ -305,18 +342,18 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
             lastError = error.localizedDescription
             throw error
         }
-        let module = FunctionModule(name: action.title, prompt: action.prompt, executor: .grokBot)
+        let module = FunctionModule(name: title, prompt: prompt, executor: .grokBot)
         let extra = [page.contextDescription, question.isEmpty ? nil : "我的问题：\(question)"]
             .compactMap { $0 }
             .joined(separator: "\n\n")
         let record = journal.enqueue(
             module: module,
-            name: action.title,
+            name: title,
             executor: .grokBot,
             resources: [],
             extraPrompt: extra,
             phase: .queued,
-            origin: action == .askAboutPage ? .quickAsk : .quickAction,
+            origin: origin,
             question: question.isEmpty ? nil : question
         )
         let request = ExecutionRequest(

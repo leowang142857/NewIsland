@@ -1,43 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// Three preset buttons plus a free-form question, all about the frontmost page.
+/// Three shortcut buttons plus a free-form question, all about the frontmost page.
 struct GrokQuickBar: View {
     @ObservedObject var engine: IslandEngine
+    @ObservedObject var settings: IslandSettings
     let onStarted: (UUID) -> Void
 
     @State private var question = ""
     @State private var capturing = false
     @State private var note: String?
 
+    private var shortcuts: [ResolvedIslandShortcut] {
+        settings.shortcutButtons.resolved()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
-                ForEach(GrokQuickAction.buttons) { action in
-                    Button {
-                        fire(action)
-                    } label: {
-                        VStack(spacing: 2) {
-                            Image(systemName: action.symbolName)
-                                .font(.caption)
-                            Text(action.title)
-                                .font(.caption2.weight(.medium))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 34)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(IslandChrome.neonCyan.opacity(0.08))
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(IslandChrome.neonCyan.opacity(0.35), lineWidth: 1)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(capturing)
-                    .help("截当前最前面的页面，交给 Grok \(action.title)")
+                ForEach(shortcuts.indices, id: \.self) { index in
+                    shortcutButton(shortcuts[index])
                 }
             }
 
@@ -45,12 +27,12 @@ struct GrokQuickBar: View {
                 TextField("问 Grok（附当前页截图）", text: $question)
                     .textFieldStyle(.roundedBorder)
                     .font(.caption)
-                    .onSubmit { fire(.askAboutPage) }
+                    .onSubmit { fireAsk() }
                 if capturing {
                     ProgressView().controlSize(.mini)
                 } else {
                     Button {
-                        fire(.askAboutPage)
+                        fireAsk()
                     } label: {
                         Image(systemName: "paperplane.fill")
                     }
@@ -68,18 +50,62 @@ struct GrokQuickBar: View {
         }
     }
 
-    private func fire(_ action: GrokQuickAction) {
-        guard !capturing else { return }
+    private func shortcutButton(_ shortcut: ResolvedIslandShortcut) -> some View {
+        Button {
+            fire(shortcut)
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: shortcut.symbolName)
+                    .font(.caption)
+                Text(shortcut.title)
+                    .font(.caption2.weight(.medium))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(IslandChrome.neonCyan.opacity(0.08))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(IslandChrome.neonCyan.opacity(0.35), lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(capturing || !shortcut.isReady)
+        .help("截当前最前面的页面，交给 Grok \(shortcut.title)")
+    }
+
+    private func fire(_ shortcut: ResolvedIslandShortcut) {
+        guard !capturing, shortcut.isReady else { return }
         capturing = true
         note = nil
-        let asked = action == .askAboutPage ? question : nil
         Task { @MainActor in
             let page = await PageCapture.snapshot()
             capturing = false
             note = page.captureNote
             do {
-                let record = try engine.runQuickAction(action, page: page, question: asked)
-                if action == .askAboutPage { question = "" }
+                let record = try engine.runShortcut(title: shortcut.title, prompt: shortcut.prompt, page: page)
+                onStarted(record.id)
+            } catch {
+                engine.reportError(error)
+            }
+        }
+    }
+
+    private func fireAsk() {
+        guard !capturing else { return }
+        capturing = true
+        note = nil
+        let asked = question
+        Task { @MainActor in
+            let page = await PageCapture.snapshot()
+            capturing = false
+            note = page.captureNote
+            do {
+                let record = try engine.runQuickAction(.askAboutPage, page: page, question: asked)
+                question = ""
                 onStarted(record.id)
             } catch {
                 engine.reportError(error)
@@ -273,7 +299,139 @@ struct MarkdownLite: View {
     }
 }
 
-/// Cursor API key, Grok model, PR repo, permissions, and the island background.
+/// The three home-screen shortcut buttons. Each one is a built-in action or a custom prompt.
+struct IslandShortcutSection: View {
+    @ObservedObject var settings: IslandSettings
+
+    private static let customChoice = "custom"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("快捷按钮")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                if settings.shortcutButtons != .default {
+                    Button("重置") { settings.shortcutButtons = .default }
+                        .buttonStyle(.borderless)
+                        .font(.caption2)
+                        .help("三个按钮回到整理错题、解答题目、检查代码。")
+                }
+            }
+
+            ForEach(0..<IslandShortcutButtons.count, id: \.self) { index in
+                slotEditor(index)
+            }
+
+            Text("点按钮仍会截当前最前面的页面交给 Grok。没改过就还是整理错题、解答题目、检查代码。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func slotEditor(_ index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("按钮 \(index + 1)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Picker("", selection: choiceBinding(index)) {
+                    ForEach(GrokQuickAction.buttons) { action in
+                        Text(action.title).tag(action.rawValue)
+                    }
+                    Text("自定义").tag(Self.customChoice)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                Spacer(minLength: 0)
+            }
+
+            if isCustom(index) {
+                TextField("按钮名称", text: stringBinding(index, \.customTitle))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                TextField("交给 Grok 的提示词", text: stringBinding(index, \.customPrompt), axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .lineLimit(2...4)
+                HStack(spacing: 6) {
+                    Text("图标")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: stringBinding(index, \.customSymbol)) {
+                        ForEach(IslandShortcutSlot.symbolAllowlist, id: \.self) { symbol in
+                            Image(systemName: symbol).tag(symbol)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func isCustom(_ index: Int) -> Bool {
+        guard settings.shortcutButtons.slots.indices.contains(index) else { return false }
+        return settings.shortcutButtons.slots[index].kind == .custom
+    }
+
+    private func choiceBinding(_ index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard settings.shortcutButtons.slots.indices.contains(index) else {
+                    return GrokQuickAction.buttons[index].rawValue
+                }
+                let slot = settings.shortcutButtons.slots[index]
+                guard slot.kind == .builtin else { return Self.customChoice }
+                if GrokQuickAction.buttons.contains(where: { $0.rawValue == slot.actionRaw }) {
+                    return slot.actionRaw
+                }
+                return GrokQuickAction.buttons[index].rawValue
+            },
+            set: { raw in
+                var buttons = settings.shortcutButtons
+                while buttons.slots.count < IslandShortcutButtons.count {
+                    buttons.slots.append(IslandShortcutButtons.default.slots[buttons.slots.count])
+                }
+                guard buttons.slots.indices.contains(index) else { return }
+                if raw == Self.customChoice {
+                    buttons.slots[index].kind = .custom
+                    if !IslandShortcutSlot.symbolAllowlist.contains(buttons.slots[index].customSymbol) {
+                        buttons.slots[index].customSymbol = IslandShortcutSlot.fallbackSymbol
+                    }
+                } else if let action = GrokQuickAction(rawValue: raw), GrokQuickAction.buttons.contains(action) {
+                    buttons.slots[index].kind = .builtin
+                    buttons.slots[index].actionRaw = action.rawValue
+                }
+                settings.shortcutButtons = buttons
+            }
+        )
+    }
+
+    private func stringBinding(
+        _ index: Int,
+        _ keyPath: WritableKeyPath<IslandShortcutSlot, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                guard settings.shortcutButtons.slots.indices.contains(index) else { return "" }
+                return settings.shortcutButtons.slots[index][keyPath: keyPath]
+            },
+            set: { newValue in
+                var buttons = settings.shortcutButtons
+                guard buttons.slots.indices.contains(index) else { return }
+                buttons.slots[index][keyPath: keyPath] = newValue
+                settings.shortcutButtons = buttons
+            }
+        )
+    }
+}
+
+/// Cursor API key, Grok model, PR repo, permissions, shortcut buttons, and the island background.
 struct SettingsPane: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var monitor: CloudActivityMonitor
@@ -357,6 +515,12 @@ struct SettingsPane: View {
                         note("快捷按钮要截当前页面。勾选 grok岛 后重开 app。")
                     }
                 }
+
+                Rectangle()
+                    .fill(IslandChrome.layerRule)
+                    .frame(height: 1)
+
+                IslandShortcutSection(settings: settings)
 
                 Rectangle()
                     .fill(IslandChrome.layerRule)
