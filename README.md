@@ -1,17 +1,6 @@
-# GrokIsland (grok岛)
+# NewIsland
 
-GrokIsland — also referred to as NewIsland — is a native macOS app that puts a
-Dynamic Island–style panel at the top of your screen. It combines three things in
-one small, always-available surface:
-
-- **A modular island.** Drop files, folders, or links onto modules you define
-  yourself (for example "Translate", "Organize notes", "Run a script") and let
-  them run.
-- **A deadline (DDL) energy bar.** Type deadlines in plain language and watch a
-  single energy bar show how much is on your plate.
-- **Ask Grok and watch your Cursor agents.** Send the page in front of you to a
-  Grok model through the Cursor Cloud Agents API, and see status lights for your
-  running Cloud Agents and open pull requests.
+NewIsland is a top-of-screen work island for Mac: deadlines, focus, and Ask Grok sit in one strip beside the notch, so you don't switch windows. Mac 上的灵动岛，把今天要做的事和问 Grok 放在屏幕最上面。 Keywords: Mac Dynamic Island, macOS menu bar island, notch productivity, deadline focus timer, ask Grok on Mac, 灵动岛 Mac, 顶部任务条, 截止日期 专注计时.
 
 The app is written in Swift with SwiftUI and AppKit. The core logic lives in a
 platform-independent Swift package (`GrokIslandCore`) with its own test suite.
