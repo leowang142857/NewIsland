@@ -280,7 +280,7 @@ final class IslandEngine: ObservableObject, IslandEngineAPI {
             throw IslandError.emptyInput
         }
         guard let collaborator else {
-            let error = IslandError.executorFailed("拆分任务还没有接上 Cursor Cloud Agent。")
+            let error = IslandError.executorFailed("拆分任务还没有接上模型服务。")
             lastError = error.localizedDescription
             throw error
         }

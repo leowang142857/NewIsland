@@ -31,8 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let deadlines = DeadlineStore(fileURL: DeadlineStore.defaultFileURL)
     lazy var engine: IslandEngine = {
         let storage = settings.storage
-        let grok = CursorAgentGrokClient(credentials: { storage.credentials() })
-        let split = CursorSplitTaskOrchestrator(credentials: { storage.credentials() })
+        let grok = RoutedGrokClient(resolve: { storage.resolveProvider() })
+        let split = RoutedSplitTaskOrchestrator(resolve: { storage.resolveProvider() })
         return IslandEngine(
             journal: RunJournal(fileURL: RunJournal.defaultFileURL),
             grokBot: GrokBotExecutor(client: grok),

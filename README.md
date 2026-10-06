@@ -67,7 +67,7 @@ chunks. Each module has a name, a prompt, and an executor:
 
 | Executor | What it does |
 | --- | --- |
-| **Grok Bot** | Sends the prompt and the dropped resources to a Grok model via a Cursor Cloud Agent (see [Ask Grok](#ask-grok-via-cursor-cloud-agents)). |
+| **Grok Bot** | Sends the prompt and the dropped resources to the model provider chosen in Settings (xAI, OpenAI, DeepSeek, local Ollama, an OpenAI-compatible endpoint, or Cursor Cloud Agents). |
 | **Local** | Runs on your Mac: optionally opens the dropped files, and optionally runs a shell command that you type and confirm. |
 
 How to use them:
@@ -111,28 +111,43 @@ shell command. Only a command you type into the confirmation dialog is run
   without a time defaults to 23:59; a time without a date means today, or
   tomorrow if that time has already passed.
 
-### Ask Grok via Cursor Cloud Agents
+### Ask Grok
 
-Grok answers come from a Grok model running as a **Cursor Cloud Agent that is not
-attached to any repository**. For every Grok request the app:
+Ask Grok, the three shortcut buttons, and split-task all use the **model service**
+selected in Settings. A Cursor account is not required.
 
-1. Creates an agent with `POST /v1/agents` on the Cursor API, using your Grok
-   model ID (or the first Grok model listed by `/v1/models` if you left it
-   empty).
-2. Polls the run until it finishes (up to 20 minutes) and shows progress on the
-   island.
-3. Shows the Markdown answer on the island, where you can copy it or open the
-   Cloud Agent in Cursor to keep the conversation going. Cancelling a run on the
-   island also cancels the cloud run.
+| Service | What you need |
+| --- | --- |
+| **xAI (Grok)** | An API key from [console.x.ai](https://console.x.ai/). Default model `grok-4.6`, which accepts screenshots. |
+| **OpenAI** | An API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Default model `gpt-4o`. |
+| **DeepSeek** | An API key from [platform.deepseek.com](https://platform.deepseek.com/api_keys). Default model `deepseek-flash`, which accepts screenshots. |
+| **Local Ollama** | Ollama running on your Mac. Default address `http://127.0.0.1:11434/v1`. No API key. Type a model name (a vision model if you want the shortcut screenshots to be read). |
+| **OpenAI-compatible** | Any endpoint that speaks chat completions: base URL, API key, and model name. |
+| **Cursor (advanced)** | A Cursor API key. Answers run as a Cloud Agent with no repository attached. |
+
+For every non-Cursor provider the app sends one OpenAI-compatible
+`POST /chat/completions` request. Shortcut buttons attach the frontmost-window
+screenshot as an image. If the chosen model cannot take images, the run fails
+with a clear message and the screenshot is not silently dropped.
+
+**Cursor Cloud Agents** remain available from the same provider menu. In that mode
+the app still creates a no-repo agent with `POST /v1/agents`, polls until it
+finishes, and can open the agent in Cursor. Cancelling a run on the island also
+cancels the cloud run. Leave the Grok model ID empty to pick a Grok model from
+`/v1/models`.
+
+**Split-task** breaks one job into 2–4 pieces, runs them in parallel, then writes
+a combined summary. On a model API those steps are chat completions. On Cursor
+they are cloud agents. Either way, each piece has its own task light, a failed
+piece stays marked failed, and the other pieces are kept.
 
 What gets sent:
 
 - Up to 5 images (PNG, JPEG, GIF, WebP, 15 MB each) are attached as images.
 - UTF-8 text files up to 120 KB are inlined into the prompt.
-- Links are passed as URLs. Folders are mentioned by name only, since the agent
-  cannot see your disk.
-- The prompt tells the agent this is a Q&A: it must not modify repositories or
-  open branches or pull requests.
+- Links are passed as URLs. Folders are mentioned by name only.
+- The prompt says this is a Q&A: it must not modify repositories or open branches
+  or pull requests.
 
 **Quick actions.** The expanded island has three buttons — 整理错题 (organize
 mistakes into a review sheet), 解答题目 (solve the problems on screen), and
@@ -142,7 +157,7 @@ field. Each one:
 - Captures a screenshot of the frontmost window (never the island itself).
 - If the frontmost app is a supported browser (Safari, Chrome, Edge, Brave, Arc,
   Vivaldi, Opera), also reads the current tab's URL.
-- Sends both to Grok with a task-specific prompt.
+- Sends both to the selected model with a task-specific prompt.
 
 ### Cursor agent and PR status lights
 
@@ -179,7 +194,8 @@ field. Each one:
 
 - macOS 14 (Sonoma) or later
 - Xcode 15 or later
-- For Grok answers and Cloud Agent status: a Cursor account and a Cursor API key
+- For Ask Grok, the shortcut buttons, and split-task: an API key for xAI, OpenAI, or DeepSeek, a local Ollama, or any OpenAI-compatible endpoint. A Cursor account is optional.
+- Optional, for Cloud Agent status: a Cursor API key
 - Optional, for PR status: the `origin` CLI installed and signed in
 
 ---
@@ -230,15 +246,22 @@ Open the settings pane with the **gear** button on the island.
 
 | Setting | Purpose |
 | --- | --- |
-| **Cursor API key** | Used to ask Grok and to read Cloud Agent status. Create one at [cursor.com/dashboard/api](https://cursor.com/dashboard/api), paste it in, and click Save. You can clear it at any time. |
-| **Grok model ID** | Leave empty to automatically pick a Grok model from `/v1/models`, or enter a specific model ID. |
+| **模型服务** ("Model service") | Which backend answers Ask Grok, the shortcut buttons, and split-task. Choose xAI, OpenAI, DeepSeek, local Ollama, an OpenAI-compatible endpoint, or Cursor (advanced). |
+| **API key** | The key for the selected service. Paste it and click Save. You can clear it at any time. Ollama can be left blank. xAI keys come from [console.x.ai](https://console.x.ai/), OpenAI from [platform.openai.com/api-keys](https://platform.openai.com/api-keys), DeepSeek from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys), and Cursor from [cursor.com/dashboard/api](https://cursor.com/dashboard/api). |
+| **模型** ("Model") | The model name. xAI defaults to `grok-4.6`, OpenAI to `gpt-4o`, and DeepSeek to `deepseek-flash`. Ollama and compatible endpoints need a name you type. For Cursor, leave the Grok model ID empty to pick one from `/v1/models`. |
+| **接口地址** ("Base URL") | Shown for Ollama (default `http://127.0.0.1:11434/v1`) and for an OpenAI-compatible endpoint. |
 | **PR repository** | The `owner/name` repository whose open PRs drive the PR lights. Defaults to `leowang142857/GrokIsland`. |
 | **Screen Recording** | Shows whether the permission is granted, with a shortcut to System Settings. |
 | **Island background** | The expanded island's backdrop. Default is the built-in aurora glass; you can switch to solid color, gradient (presets or custom stops/angle), or an image from disk (with blur). Click **默认** ("Default") anytime to return to aurora while keeping your custom colors and image for later. |
 
-Without an API key, modules, deadlines, and Local runs still work; Grok requests
-fail with a prompt to add a key, and the Cloud Agent section shows that no key
-is set.
+The first launch asks you to pick a service and paste a key. It does not assume
+Cursor. Modules, deadlines, and Local runs still work with nothing filled in;
+Grok requests fail with a prompt to choose a service. An install that already
+has a Cursor API key keeps using Cursor until you pick something else.
+
+If you still keep a Cursor key, the Cloud Agent lights keep using it even when
+answers go to another provider. Without that key, the Cloud Agent section shows
+that no Cursor key is set.
 
 ### Island background details
 
@@ -262,10 +285,12 @@ is set.
 ## Privacy, permissions, and secrets
 
 - **No secrets live in this repository.** The app never ships with an API key.
-  Your Cursor API key is entered at runtime and stored only on your Mac, in
-  `~/Library/Application Support/GrokIsland/cursor-api-key` with `0600`
-  permissions. It is sent only to `api.cursor.com` as a bearer token.
-- The key is stored in a file rather than the login Keychain because ad-hoc
+  Each provider key is entered at runtime and stored only on your Mac, as its own
+  `0600` file under `~/Library/Application Support/GrokIsland/` (`cursor-api-key`,
+  `xai-api-key`, `openai-api-key`, `deepseek-api-key`, `ollama-api-key`,
+  `compatible-api-key`). A key is sent only to that provider, as a bearer token,
+  and is never written to logs.
+- Keys are stored in files rather than the login Keychain because ad-hoc
   signed development builds get a new code identity on every rebuild, which
   would trigger a Keychain prompt each time.
 - Please do not commit API keys, tokens, or personal data files. If you fork the
@@ -276,9 +301,9 @@ is set.
   browser's current URL.
 - Accessibility and Input Monitoring are **not** requested.
 - The app is not sandboxed and uses the outgoing network client entitlement.
-- Content you send to Grok (screenshots, URLs, inlined files, your prompt) goes
-  to Cursor's Cloud Agents API and appears as a Cloud Agent in your Cursor
-  account.
+- Content you send (screenshots, URLs, inlined files, your prompt) goes to the
+  provider you selected. With Cursor selected, it also appears as a Cloud Agent
+  in your Cursor account.
 
 ---
 
@@ -292,17 +317,25 @@ Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
 | `deadlines.json` | Your deadlines |
 | `run-journal.json` | Run records, including Grok answers |
 | `backgrounds/` | Copies of custom island background images |
-| `cursor-api-key` | Your Cursor API key (`0600`) |
+| `cursor-api-key` | Cursor API key (`0600`), if you use Cloud Agents |
+| `xai-api-key` | xAI API key (`0600`) |
+| `openai-api-key` | OpenAI API key (`0600`) |
+| `deepseek-api-key` | DeepSeek API key (`0600`) |
+| `ollama-api-key` | Optional Ollama key (`0600`) |
+| `compatible-api-key` | OpenAI-compatible API key (`0600`) |
 
-The Grok model ID and PR repository are stored in the app's user defaults.
+The selected provider, model ids, Ollama or compatible base URL, and PR
+repository are stored in the app's user defaults. An older install with only
+`cursor-api-key` and no provider choice keeps using Cursor.
 
 ---
 
 ## Headless core and tests (macOS or Linux)
 
 The app itself needs macOS and Xcode, but the `GrokIslandCore` package — module
-storage, drop intake, the run state machine, executors, the Cursor API client,
-deadline parsing, and activity monitoring — builds without a UI. Its XCTest
+storage, drop intake, the run state machine, executors, the model-provider and
+chat-completions clients, the Cursor API client, deadline parsing, and activity
+monitoring — builds without a UI. Its XCTest
 suite runs on macOS and on Linux.
 
 ```bash
@@ -335,12 +368,15 @@ on their own.
 | `ExecutionRouter` | Dispatches runs to the Grok Bot or Local executor |
 | `RunJournal` | Run state machine, progress, and optional JSON persistence |
 | `LocalExecutor` | Opens files and runs a *confirmed* shell command |
-| `GrokBotExecutor` / `GrokBotClient` | Grok executor facade; the app injects `CursorAgentGrokClient` |
-| `CursorCloudAPI` / `CursorAgentGrokClient` | Minimal Cursor Cloud Agents API v1 client, and the Grok client built on it |
+| `GrokBotExecutor` / `GrokBotClient` | Grok executor facade; the app injects `RoutedGrokClient` |
+| `ModelProviderKind` / `IslandSettingsStorage` | Provider choice, per-provider API key files, model id, and base URL |
+| `ChatCompletionClient` / `ChatCompletionGrokClient` | OpenAI-compatible chat completions, including image input |
+| `ChatSplitTaskOrchestrator` | Split-task planner, parallel subtasks, and summary as model calls |
+| `CursorCloudAPI` / `CursorAgentGrokClient` | Cursor Cloud Agents API v1 client, and the Grok client built on it |
 | `CloudActivityMonitor` | Polls Cloud Agents (Cursor API) and open PRs (`origin` CLI) |
 | `TaskLightBoard` | One light per run, Cloud Agent, and PR |
 | `DeadlineStore` / `DeadlineParser` | Deadline persistence, free-text due-date parsing, energy and urgency |
-| `IslandSettings` / `IslandSettingsStorage` | API key file, Grok model ID, PR repository |
+| `IslandSettings` / `IslandSettingsStorage` | Provider choice, API key files, model id, base URL, PR repository |
 | `IslandBackgroundStyle` | Expanded-island background (aurora / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
 
 ### Typical calls
@@ -401,6 +437,8 @@ GrokIsland/
   ExecutorProtocol.swift, ExecutionRouter.swift
   LocalExecutor.swift, GrokBotExecutor.swift
   CursorCloudAPI.swift        # Cursor Cloud Agents API + Grok client
+  ModelProvider.swift          # Provider catalog, key files, image-input policy
+  ChatCompletionAPI.swift      # OpenAI-compatible chat client, routing, model split-task
   CloudActivity.swift         # Cloud Agent / PR polling via origin CLI
   GrokQuickActions.swift      # quick-action prompts
   RunJournal.swift            # persisted run records

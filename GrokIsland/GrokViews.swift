@@ -47,7 +47,7 @@ struct GrokQuickBar: View {
             splitRow
 
             if splitTargeted {
-                Text("松手后拆成 2–4 个子任务，并行交给多个 Cloud Agent")
+                Text("松手后拆成 2–4 个子任务，并行执行后再汇总")
                     .font(.caption2)
                     .foregroundStyle(IslandChrome.neonCyan)
             }
@@ -264,7 +264,7 @@ struct RunDetailView: View {
                     } else if run.isActive {
                         Text(run.origin == .splitTask
                             ? "正在把任务拆开并行执行。每个子任务有自己的任务灯，全部结束后汇总显示在这里。"
-                            : "Grok 答完后结果会显示在这里。云端 Agent 启动一般要几十秒。")
+                            : "答完后结果会显示在这里。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
@@ -499,7 +499,7 @@ struct IslandShortcutSection: View {
     }
 }
 
-/// Cursor API key, Grok model, PR repo, permissions, shortcut buttons, and the island background.
+/// Model provider, API key, PR repo, permissions, shortcut buttons, and the island background.
 struct SettingsPane: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var monitor: CloudActivityMonitor
@@ -508,50 +508,36 @@ struct SettingsPane: View {
     @State private var keyDraft = ""
     @State private var screenAccess = PageCapture.hasScreenRecordingAccess
 
-    private static let apiKeysURL = URL(string: "https://cursor.com/dashboard/api")!
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text("Cursor API key")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Text(settings.hasAPIKey ? "已保存" : "未设置")
-                            .font(.caption2)
-                            .foregroundStyle(settings.hasAPIKey ? IslandChrome.electricGreen : .orange)
-                    }
-                    HStack(spacing: 4) {
-                        SecureField(settings.hasAPIKey ? "输入新 key 替换" : "crsr_…", text: $keyDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.caption)
-                            .onSubmit(saveKey)
-                        Button("保存", action: saveKey)
-                            .controlSize(.small)
-                            .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    HStack {
-                        Button("获取 API key") { NSWorkspace.shared.open(Self.apiKeysURL) }
-                            .buttonStyle(.borderless)
-                        if settings.hasAPIKey {
-                            Button("清除", role: .destructive) {
-                                do { try settings.clearAPIKey() } catch { engine.reportError(error) }
-                                monitor.refreshSoon(minimumAge: 0)
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                    .font(.caption2)
-                    note("用来看 Cloud Agent 进度，也用来让 Grok 解答。只存在本机 Application Support/GrokIsland。")
+                if !settings.isModelReady {
+                    note(ModelProviderMessages.settingsHint)
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Grok 模型 ID")
+                HStack {
+                    Text("模型服务")
                         .font(.caption.weight(.semibold))
-                    TextField("留空：自动选一个 Grok 模型", text: $settings.grokModelID)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
+                    Spacer()
+                    Picker("模型服务", selection: $settings.providerKind) {
+                        ForEach(ModelProviderKind.allCases) { kind in
+                            Text(kind.settingsTitle).tag(kind)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .font(.caption)
+                }
+                .onChange(of: settings.providerKind) { keyDraft = "" }
+
+                providerKeySection
+                providerModelSection
+
+                if settings.providerKind == .cursor {
+                    note("问 Grok、快捷按钮和拆分任务走 Cursor Cloud Agent。Key 只存在本机 Application Support/GrokIsland。")
+                } else {
+                    note("问 Grok、三个快捷按钮和拆分任务都走这里。截图会一并送出；模型若不支持图片，会明确失败，不会悄悄丢掉。")
+                    note("Cursor（高级）仍可在上面的菜单里选，用来看 Cloud Agent。没有 Cursor 账号可以不用。")
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -601,6 +587,85 @@ struct SettingsPane: View {
         .onAppear { screenAccess = PageCapture.hasScreenRecordingAccess }
     }
 
+    private var providerKeySection: some View {
+        let kind = settings.providerKind
+        let saved = settings.hasSelectedAPIKey
+        let optional = kind == .ollama
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(kind.keySectionTitle)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(keyStatusText)
+                    .font(.caption2)
+                    .foregroundStyle(keyStatusColor)
+            }
+            HStack(spacing: 4) {
+                SecureField(saved ? "输入新 key 替换" : kind.keyPlaceholder, text: $keyDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .onSubmit(saveKey)
+                Button("保存", action: saveKey)
+                    .controlSize(.small)
+                    .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            HStack {
+                if let url = kind.docsURL {
+                    Button(kind.docsLinkTitle) { NSWorkspace.shared.open(url) }
+                        .buttonStyle(.borderless)
+                }
+                if saved {
+                    Button("清除", role: .destructive) {
+                        do { try settings.clearProviderKey() } catch { engine.reportError(error) }
+                        monitor.refreshSoon(minimumAge: 0)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .font(.caption2)
+            if optional {
+                note("本地 Ollama 通常不需要 key。先在本机跑起来，再填写下面的模型名。")
+            }
+        }
+    }
+
+    private var keyStatusText: String {
+        if settings.providerKind == .ollama {
+            return settings.hasSelectedAPIKey ? "已保存" : "可不填"
+        }
+        return settings.hasSelectedAPIKey ? "已保存" : "未设置"
+    }
+
+    private var keyStatusColor: Color {
+        if settings.hasSelectedAPIKey { return IslandChrome.electricGreen }
+        if settings.providerKind == .ollama { return Color.secondary }
+        return Color.orange
+    }
+
+    private var providerModelSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if settings.providerKind.allowsCustomBaseURL {
+                Text(settings.providerKind == .ollama ? "Ollama 地址" : "接口地址")
+                    .font(.caption.weight(.semibold))
+                TextField(settings.providerKind.defaultBaseURL, text: $settings.endpointBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+            }
+            Text(settings.providerKind == .cursor ? "Grok 模型 ID" : "模型")
+                .font(.caption.weight(.semibold))
+            TextField(settings.providerKind.modelPlaceholder, text: modelBinding)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+        }
+    }
+
+    private var modelBinding: Binding<String> {
+        if settings.providerKind == .cursor {
+            return $settings.grokModelID
+        }
+        return $settings.providerModelID
+    }
+
     private func note(_ text: String) -> some View {
         Text(text)
             .font(.caption2)
@@ -612,7 +677,7 @@ struct SettingsPane: View {
         let key = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
         do {
-            try settings.saveAPIKey(key)
+            try settings.saveProviderKey(key)
             keyDraft = ""
             monitor.refreshSoon(minimumAge: 0)
         } catch {

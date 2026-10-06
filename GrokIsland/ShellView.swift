@@ -182,11 +182,11 @@ struct ShellView: View {
                 Button {
                     route = route == .settings ? .home : .settings
                 } label: {
-                    Image(systemName: settings.hasAPIKey ? "gearshape" : "gearshape.fill")
-                        .foregroundStyle(settings.hasAPIKey ? Color.primary : Color.orange)
+                    Image(systemName: settings.isModelReady ? "gearshape" : "gearshape.fill")
+                        .foregroundStyle(settings.isModelReady ? Color.primary : Color.orange)
                 }
                 .buttonStyle(.borderless)
-                .help(settings.hasAPIKey ? "设置" : "设置：还没填 Cursor API key")
+                .help(settings.isModelReady ? "设置" : ModelProviderMessages.gearHelp)
                 Button {
                     presence.isPinned.toggle()
                 } label: {
