@@ -8,7 +8,10 @@ struct GrokQuickBar: View {
     let onStarted: (UUID) -> Void
 
     @State private var question = ""
+    @State private var splitDraft = ""
     @State private var capturing = false
+    @State private var splitting = false
+    @State private var splitTargeted = false
     @State private var note: String?
 
     private var shortcuts: [ResolvedIslandShortcut] {
@@ -39,6 +42,14 @@ struct GrokQuickBar: View {
                     .buttonStyle(.borderless)
                     .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
+            }
+
+            splitRow
+
+            if splitTargeted {
+                Text("松手后拆成 2–4 个子任务，并行交给多个 Cloud Agent")
+                    .font(.caption2)
+                    .foregroundStyle(IslandChrome.neonCyan)
             }
 
             if let note {
@@ -77,6 +88,36 @@ struct GrokQuickBar: View {
         .help("截当前最前面的页面，交给 Grok \(shortcut.title)")
     }
 
+    private var splitRow: some View {
+        HStack(spacing: 4) {
+            TextField("拆分任务（输入或拖入一个大任务）", text: $splitDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .onSubmit { fireSplit() }
+            if splitting {
+                ProgressView().controlSize(.mini)
+            } else {
+                Button {
+                    fireSplit()
+                } label: {
+                    Image(systemName: "arrow.triangle.branch")
+                }
+                .buttonStyle(.borderless)
+                .disabled(splitDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("拆成 2–4 个子任务并行执行，完成后汇总成一条结果")
+            }
+        }
+        .padding(2)
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(IslandChrome.neonCyan.opacity(splitTargeted ? 0.9 : 0), lineWidth: 1)
+        }
+        .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
+            fireSplitDrop(providers)
+            return true
+        }
+    }
+
     private func fire(_ shortcut: ResolvedIslandShortcut) {
         guard !capturing, shortcut.isReady else { return }
         capturing = true
@@ -110,6 +151,31 @@ struct GrokQuickBar: View {
             } catch {
                 engine.reportError(error)
             }
+        }
+    }
+
+    private func fireSplit(resources: [ResourceItem] = []) {
+        do {
+            let record = try engine.splitTask(splitDraft, resources: resources)
+            splitDraft = ""
+            onStarted(record.id)
+        } catch {
+            engine.reportError(error)
+        }
+    }
+
+    private func fireSplitDrop(_ providers: [NSItemProvider]) {
+        guard !splitting else { return }
+        splitting = true
+        note = nil
+        Task { @MainActor in
+            let items = await ResourceIntake.loadItems(from: providers)
+            splitting = false
+            if items.isEmpty && splitDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                engine.reportError(IslandError.dropEmpty)
+                return
+            }
+            fireSplit(resources: items)
         }
     }
 }
@@ -196,7 +262,9 @@ struct RunDetailView: View {
                     if let answer = run.resultSummary, !run.isActive {
                         MarkdownLite(text: answer)
                     } else if run.isActive {
-                        Text("Grok 答完后结果会显示在这里。云端 Agent 启动一般要几十秒。")
+                        Text(run.origin == .splitTask
+                            ? "正在把任务拆开并行执行。每个子任务有自己的任务灯，全部结束后汇总显示在这里。"
+                            : "Grok 答完后结果会显示在这里。云端 Agent 启动一般要几十秒。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {

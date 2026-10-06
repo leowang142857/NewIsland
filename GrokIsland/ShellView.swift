@@ -276,7 +276,7 @@ struct ShellView: View {
     /// Latest Grok answer, one tap from the home screen even after the island retracted.
     @ViewBuilder
     private var lastAnswerStrip: some View {
-        if let last = engine.runs.first(where: { $0.origin != .module }) {
+        if let last = engine.runs.first(where: { $0.origin != .module && $0.origin != .splitSubtask }) {
             Button {
                 route = .run(last.id)
             } label: {

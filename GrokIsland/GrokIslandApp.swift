@@ -32,9 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var engine: IslandEngine = {
         let storage = settings.storage
         let grok = CursorAgentGrokClient(credentials: { storage.credentials() })
+        let split = CursorSplitTaskOrchestrator(credentials: { storage.credentials() })
         return IslandEngine(
             journal: RunJournal(fileURL: RunJournal.defaultFileURL),
-            grokBot: GrokBotExecutor(client: grok)
+            grokBot: GrokBotExecutor(client: grok),
+            collaborator: split
         )
     }()
     lazy var monitor = CloudActivityMonitor(storage: settings.storage)

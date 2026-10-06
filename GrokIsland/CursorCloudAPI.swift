@@ -69,6 +69,12 @@ struct CloudRun: Codable, Equatable, Sendable {
     }
 }
 
+/// How one cloud run ended. Callers decide whether a non-success status fails the whole job.
+enum CloudAgentFinish: Equatable, Sendable {
+    case finished(text: String, link: String?)
+    case failed(status: String, link: String?)
+}
+
 struct CloudModel: Codable, Equatable, Sendable {
     var id: String
     var displayName: String?
@@ -124,6 +130,58 @@ struct CursorCloudAPI: Sendable {
 
     func cancelRun(agentID: String, runID: String) async throws {
         _ = try await send("POST", "/v1/agents/\(agentID)/runs/\(runID)/cancel", body: [:])
+    }
+
+    /// Creates a no-repo agent and polls until the run ends. Cancellation also cancels the cloud run.
+    func completeAgent(
+        name: String,
+        prompt: String,
+        images: [PromptImage],
+        modelID: String?,
+        activity: String,
+        pollInterval: Duration = .seconds(2),
+        timeout: TimeInterval = 20 * 60,
+        progress: @escaping @Sendable (ExecutionProgress) async -> Void = { _ in }
+    ) async throws -> CloudAgentFinish {
+        await progress(ExecutionProgress(fraction: 0.05, message: activity))
+        let created = try await createAgent(name: name, prompt: prompt, images: images, modelID: modelID)
+        let agentID = created.agent.id
+        let link = created.agent.url
+        var run = created.run
+        await progress(ExecutionProgress(fraction: 0.1, message: activity, link: link))
+
+        let started = Date()
+        do {
+            while !run.isTerminal {
+                try await Task.sleep(for: pollInterval)
+                run = try await self.run(agentID: agentID, runID: run.id)
+                let elapsed = Date().timeIntervalSince(started)
+                if elapsed > timeout {
+                    throw IslandError.executorFailed("\(activity)超过 \(Int(timeout / 60)) 分钟还没结束。")
+                }
+                await progress(ExecutionProgress(
+                    fraction: 0.1 + 0.85 * (1 - exp(-elapsed / 90)),
+                    message: "\(activity) · \(Int(elapsed))s",
+                    link: link
+                ))
+            }
+        } catch is CancellationError {
+            let runID = run.id
+            let api = self
+            Task.detached { try? await api.cancelRun(agentID: agentID, runID: runID) }
+            throw CancellationError()
+        }
+
+        switch run.status.uppercased() {
+        case "FINISHED":
+            let text = run.result?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return .finished(text: text, link: link)
+        case "CANCELLED":
+            if Task.isCancelled { throw CancellationError() }
+            return .failed(status: run.status, link: link)
+        default:
+            return .failed(status: run.status, link: link)
+        }
     }
 
     static func promptBody(text: String, images: [PromptImage]) -> [String: Any] {
@@ -275,6 +333,13 @@ enum GrokPromptBuilder {
     static let maxInlineTextBytes = 120_000
     static let maxImageBytes = 15 * 1024 * 1024
     static let maxImages = 5
+
+    /// Attachment lines for a prompt that already has its own instructions.
+    /// Image files within the size cap are appended to `images`.
+    static func resourceSection(resources: [ResourceItem], images: inout [PromptImage]) -> String {
+        resources.map { describe($0, images: &images) }.joined(separator: "\n")
+    }
+
     private static let imageTypes: [String: String] = [
         "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
         "gif": "image/gif", "webp": "image/webp"

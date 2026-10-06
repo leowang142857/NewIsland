@@ -28,6 +28,10 @@ enum RunOrigin: String, Codable, Equatable, Sendable {
     case module
     case quickAction
     case quickAsk
+    /// Combined result of a split task. The activity rail shows the subtasks, not this row.
+    case splitTask
+    /// One parallel subtask of a split. Each one gets its own activity light.
+    case splitSubtask
 }
 
 struct RunRecord: Identifiable, Equatable, Sendable {
@@ -48,15 +52,19 @@ struct RunRecord: Identifiable, Equatable, Sendable {
     var origin: RunOrigin = .module
     /// What the user typed into 问 Grok, shown above the answer.
     var question: String? = nil
+    /// Set on a split subtask so cancelling the parent can find its children.
+    var parentRunID: UUID? = nil
 
     var isActive: Bool { phase.isActive }
     var isGrokAnswer: Bool { executor == .grokBot }
+    /// The split parent is the combined result. Its subtasks are the lights.
+    var showsActivityLight: Bool { origin != .splitTask }
 }
 
 extension RunRecord: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, moduleID, moduleName, executor, resources, extraPrompt, phase, progress
-        case message, resultSummary, createdAt, updatedAt, link, origin, question
+        case message, resultSummary, createdAt, updatedAt, link, origin, question, parentRunID
     }
 
     init(from decoder: Decoder) throws {
@@ -76,6 +84,7 @@ extension RunRecord: Codable {
         link = try c.decodeIfPresent(String.self, forKey: .link)
         origin = try c.decodeIfPresent(RunOrigin.self, forKey: .origin) ?? .module
         question = try c.decodeIfPresent(String.self, forKey: .question)
+        parentRunID = try c.decodeIfPresent(UUID.self, forKey: .parentRunID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -95,6 +104,7 @@ extension RunRecord: Codable {
         try c.encodeIfPresent(link, forKey: .link)
         try c.encode(origin, forKey: .origin)
         try c.encodeIfPresent(question, forKey: .question)
+        try c.encodeIfPresent(parentRunID, forKey: .parentRunID)
     }
 }
 

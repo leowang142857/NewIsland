@@ -66,6 +66,7 @@ final class RunJournal: ObservableObject {
         phase: RunPhase = .queued,
         origin: RunOrigin = .module,
         question: String? = nil,
+        parentRunID: UUID? = nil,
         id: UUID = UUID()
     ) -> RunRecord {
         let now = Date()
@@ -83,7 +84,8 @@ final class RunJournal: ObservableObject {
             createdAt: now,
             updatedAt: now,
             origin: origin,
-            question: question
+            question: question,
+            parentRunID: parentRunID
         )
         runs.insert(record, at: 0)
         persist()

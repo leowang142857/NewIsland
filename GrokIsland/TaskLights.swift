@@ -68,8 +68,9 @@ enum TaskLightBoard {
         now: Date = Date(),
         recentWindow: TimeInterval = recentWindow
     ) -> [TaskLight] {
-        let active = runs.filter(\.isActive).map(light(for:))
-        let recent = runs
+        let boardRuns = runs.filter(\.showsActivityLight)
+        let active = boardRuns.filter(\.isActive).map(light(for:))
+        let recent = boardRuns
             .filter { $0.phase.isTerminal && now.timeIntervalSince($0.updatedAt) < recentWindow }
             .map(light(for:))
         let localLinks = Set(runs.compactMap(\.link))

@@ -172,6 +172,8 @@ private struct RunRow: View {
         switch run.origin {
         case .quickAsk: "问答"
         case .quickAction: "功能条"
+        case .splitTask: "拆分"
+        case .splitSubtask: "子任务"
         case .module: run.executor == .local ? "本地" : "模块"
         }
     }
