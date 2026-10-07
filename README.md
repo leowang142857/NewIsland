@@ -2,6 +2,8 @@
 
 NewIsland is a top-of-screen work island for Mac: deadlines, focus, and Ask Grok sit in one strip beside the notch, so you don't switch windows. Mac 上的灵动岛，把今天要做的事和问 Grok 放在屏幕最上面。 Keywords: Mac Dynamic Island, macOS menu bar island, notch productivity, deadline focus timer, ask Grok on Mac, 灵动岛 Mac, 顶部任务条, 截止日期 专注计时.
 
+Maintained by [@leowang142857](https://github.com/leowang142857).
+
 The app is written in Swift with SwiftUI and AppKit. The core logic lives in a
 platform-independent Swift package (`GrokIslandCore`) with its own test suite.
 
