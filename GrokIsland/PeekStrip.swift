@@ -31,12 +31,6 @@ enum PeekStrip {
         mouseX >= stripMinX && mouseX < stripMinX + lockZoneWidth
     }
 
-    /// Collapsed-strip badge. Empty trays stay quiet; large trays cap at `99+`.
-    static func stagingBadgeLabel(count: Int) -> String? {
-        guard count > 0 else { return nil }
-        return count > 99 ? "99+" : "\(count)"
-    }
-
     /// Whether the collapsed strip should expand. While locked it never does, not even for a drag.
     static func shouldReveal(
         locked: Bool,

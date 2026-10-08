@@ -60,8 +60,7 @@ When expanded, the island is organized in layers, from top to bottom:
 When collapsed, the peek strip shows the collapse lock on the far left, then up
 to a few task lights (two lights plus a count when there are more than three),
 and the countdown of the most pressing deadline on the right (split across both
-sides of the notch on notched screens). If the staging tray holds any files, a
-cyan count sits on that right wing as well.
+sides of the notch on notched screens).
 
 ### Modular island (function modules)
 
@@ -80,9 +79,6 @@ How to use them:
   (Translate), 整理笔记 (Organize notes), and 打开文件 (Open files).
 - Click a tile to edit or delete the module.
 - **Drag files, folders, or links onto a tile** to run that module on them.
-- **Drag files or folders onto the staging well** (under the tiles, or onto the
-  暂存 tab) to park a copy in the tray instead of running a module. See
-  [Staging tray](#staging-tray).
 
 Drop feedback is explicit so you always know what happened:
 
@@ -90,31 +86,11 @@ Drop feedback is explicit so you always know what happened:
   goes to Grok or runs locally; the hovered tile grows.
 - After you let go, the tile shows "reading…", then either a green
   "sent N items" or a red "not sent". The tile's corner light then follows the
-  run. Dropping outside every tile and outside the staging well tells you nothing was sent.
+  run. Dropping outside every tile tells you nothing was sent.
 
 **Local runs are always confirmed.** The module prompt is never executed as a
 shell command. Only a command you type into the confirmation dialog is run
 (with `/bin/zsh`), and only after you confirm it.
-
-### Staging tray (文件暂存)
-
-The **暂存** ("Staging") tab is a shelf for files you want nearby but not on the
-Desktop. Drop a file or folder on the dashed well, or onto a folder row inside
-the tab.
-
-- The default is **复制** ("Copy"). The tray stores its own copy under Application
-  Support and leaves the original where it was.
-- **桌面移入** ("Move from Desktop") moves a file only when it is on the Desktop
-  and only after the staged copy is checked. A file from anywhere else is still
-  copied, and the island says so. The Desktop folder itself is refused. A failed
-  delete leaves both the original and the staged copy.
-- Create folders, rename them, and move items between folders from each row's
-  menu. Drag an item onto a folder row to file it there.
-- Drag a row out of the island onto the Desktop or a Finder window to export a
-  copy. The tray keeps its copy. **移出托盘** ("Remove from tray") asks before it
-  deletes that staged copy; it does not delete an original that was only copied.
-- The catalog is `staging/catalog.json`. Bytes live in `staging/items/`. Both
-  survive a relaunch. The collapsed peek strip shows a count while anything is staged.
 
 ### Deadlines and the DDL energy bar
 
@@ -343,8 +319,6 @@ Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
 | `deadlines.json` | Your deadlines |
 | `run-journal.json` | Run records, including Grok answers |
 | `backgrounds/` | Copies of custom island background images |
-| `staging/catalog.json` | Staging tray folders and item metadata |
-| `staging/items/` | Copies of files and folders held in the tray |
 | `cursor-api-key` | Cursor API key (`0600`), if you use Cloud Agents |
 | `xai-api-key` | xAI API key (`0600`) |
 | `openai-api-key` | OpenAI API key (`0600`) |
@@ -404,7 +378,6 @@ on their own.
 | `CloudActivityMonitor` | Polls Cloud Agents (Cursor API) and open PRs (`origin` CLI) |
 | `TaskLightBoard` | One light per run, Cloud Agent, and PR |
 | `DeadlineStore` / `DeadlineParser` | Deadline persistence, free-text due-date parsing, energy and urgency |
-| `StagingTrayStore` | Staging tray catalog: copy-or-move policy, folders, export, confirmed delete |
 | `IslandSettings` / `IslandSettingsStorage` | Provider choice, API key files, model id, base URL, PR repository |
 | `IslandBackgroundStyle` | Expanded-island background (aurora / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
 
@@ -473,8 +446,6 @@ GrokIsland/
   RunJournal.swift            # persisted run records
   TaskLights.swift            # per-task lights
   Deadlines.swift             # deadline store, parser, energy
-  StagingTray.swift           # staging tray catalog and copy/move policy
-  StagingTrayViews.swift      # tray list, drop well, drag-out
   IslandSettings.swift        # API key file and preferences
 Tests/GrokIslandCoreTests/    # XCTest suite for GrokIslandCore
 scripts/

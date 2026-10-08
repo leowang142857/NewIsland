@@ -12,7 +12,7 @@ struct GrokIslandApp: App {
                     .font(.title3.weight(.semibold))
                 Text("The island panel is the main UI. This settings pane is a stub.")
                     .foregroundStyle(.secondary)
-                Text("Modules, run records, deadlines, and the staging tray are stored in Application Support/GrokIsland/")
+                Text("Modules, run records, and DDLs are stored in Application Support/GrokIsland/")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("在桌面创建快捷方式") {
@@ -29,7 +29,6 @@ struct GrokIslandApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = IslandSettings()
     let deadlines = DeadlineStore(fileURL: DeadlineStore.defaultFileURL)
-    let staging = StagingTrayStore()
     lazy var engine: IslandEngine = {
         let storage = settings.storage
         let grok = RoutedGrokClient(resolve: { storage.resolveProvider() })
@@ -47,7 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         panelController = IslandPanelController(
             engine: engine,
-            staging: staging,
             monitor: monitor,
             settings: settings,
             deadlines: deadlines
