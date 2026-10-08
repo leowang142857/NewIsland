@@ -201,7 +201,7 @@ final class CursorAgentGrokClientTests: XCTestCase {
                 return (200, #"{"items":[{"id":"composer-2"},{"id":"grok-4.7","displayName":"Grok 4.7"}]}"#)
             case "POST /v1/agents":
                 return (200, """
-                {"agent":{"id":"bc-9","name":"grok岛","status":"ACTIVE","url":"https://cursor.com/agents/bc-9"},
+                {"agent":{"id":"bc-9","name":"NewIsland","status":"ACTIVE","url":"https://cursor.com/agents/bc-9"},
                  "run":{"id":"run-1","agentId":"bc-9","status":"CREATING"}}
                 """)
             case "GET /v1/agents/bc-9/runs/run-1":

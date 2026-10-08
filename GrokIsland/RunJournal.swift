@@ -19,7 +19,7 @@ final class RunJournal: ObservableObject {
 
     /// Oldest records beyond this are dropped when saving.
     static let maxStoredRuns = 80
-    static let interruptedMessage = "grok岛 退出时还在运行，已中断"
+    static let interruptedMessage = "NewIsland 退出时还在运行，已中断"
 
     private let fileURL: URL?
     private let encoder: JSONEncoder

@@ -1,26 +1,24 @@
 import AppKit
 import SwiftUI
 
-/// Status dot: grey when idle, breathing green while agents / PRs / Grok runs are in flight.
+/// Status dot: grey when idle, slowly breathing green while agents / PRs / Grok runs are in flight.
 struct ActivityLight: View {
     var busy: Bool
     var warning: Bool = false
     var size: CGFloat = 7
 
     private var color: Color {
-        if warning { return .orange }
-        return busy ? IslandChrome.electricGreen : Color.secondary.opacity(0.7)
+        if warning { return IslandChrome.ember }
+        return busy ? IslandChrome.positive : Color.white.opacity(0.28)
     }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !busy)) { context in
-            let wave = busy ? (sin(context.date.timeIntervalSinceReferenceDate * .pi / 0.8) + 1) / 2 : 1
+            let wave = busy ? (sin(context.date.timeIntervalSinceReferenceDate * .pi / 1.2) + 1) / 2 : 1
             Circle()
                 .fill(color)
                 .frame(width: size, height: size)
-                .scaleEffect(busy ? 0.8 + 0.35 * wave : 1)
-                .opacity(busy ? 0.55 + 0.45 * wave : 1)
-                .shadow(color: color.opacity(busy ? 0.9 * wave : 0), radius: 4)
+                .opacity(busy ? 0.45 + 0.55 * wave : 1)
         }
         .frame(width: size * 1.4, height: size * 1.4)
         .accessibilityLabel(busy ? "有任务在运行" : "空闲")
@@ -30,11 +28,11 @@ struct ActivityLight: View {
 extension TaskLightState {
     var color: Color {
         switch self {
-        case .running, .succeeded: IslandChrome.electricGreen
-        case .queued, .idle: IslandChrome.neonCyan
-        case .waiting: IslandChrome.amber
-        case .failed: IslandChrome.alertRed
-        case .cancelled: Color.secondary
+        case .running, .succeeded: IslandChrome.positive
+        case .queued, .idle: Color.white.opacity(0.45)
+        case .waiting: IslandChrome.caution
+        case .failed: IslandChrome.danger
+        case .cancelled: Color.white.opacity(0.25)
         }
     }
 }
@@ -47,15 +45,13 @@ struct TaskLightDot: View {
     var body: some View {
         let color = state.color
         let animated = state.isAnimated
-        let period = state == .running ? 0.8 : 1.4
+        let period = state == .running ? 1.2 : 2.0
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !animated)) { context in
             let wave = animated ? (sin(context.date.timeIntervalSinceReferenceDate * .pi / period) + 1) / 2 : 1
             Circle()
                 .fill(color)
                 .frame(width: size, height: size)
-                .scaleEffect(animated ? 0.8 + 0.35 * wave : 1)
-                .opacity(animated ? 0.55 + 0.45 * wave : 1)
-                .shadow(color: color.opacity(animated ? 0.9 * wave : 0.55), radius: animated ? 4 : 2)
+                .opacity(animated ? 0.45 + 0.55 * wave : 1)
         }
         .frame(width: size * 1.4, height: size * 1.4)
         .accessibilityLabel(state.label)
@@ -94,24 +90,23 @@ struct TaskLightRail: View {
 
     var body: some View {
         if lights.isEmpty {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 ActivityLight(busy: false, size: 6)
-                Text("空闲 · 没有在跑的任务")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text("没有在跑的任务")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
             .frame(height: 22)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     ForEach(lights) { light in
                         TaskLightChip(light: light) { onSelect(light) }
                     }
                 }
-                .padding(.vertical, 1)
             }
-            .frame(height: 24)
+            .frame(height: 22)
         }
     }
 }
@@ -120,40 +115,37 @@ private struct TaskLightChip: View {
     let light: TaskLight
     let action: () -> Void
 
+    @State private var hovering = false
+
     var body: some View {
-        let tint = light.state.color
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 TaskLightDot(state: light.state, size: 6)
-                Text(light.kind.label)
-                    .font(.system(size: 9, weight: .heavy))
-                    .foregroundStyle(tint)
                 Text(light.title)
-                    .font(.caption2)
+                    .font(.system(size: 11))
                     .lineLimit(1)
-                    .frame(maxWidth: 96, alignment: .leading)
+                    .frame(maxWidth: 104, alignment: .leading)
                 if let progress = light.progress {
                     Text("\(Int(progress * 100))%")
-                        .font(.caption2.monospacedDigit())
+                        .font(.system(size: 10).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
             .background {
-                Capsule().fill(tint.opacity(0.12))
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(hovering ? IslandChrome.surfaceRaised : IslandChrome.surface)
             }
-            .overlay {
-                Capsule().strokeBorder(tint.opacity(0.5), lineWidth: 1)
-            }
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
         .help("\(light.kind.label) · \(light.state.label) · \(light.title)")
     }
 }
 
-/// Two quick neon blinks on the island edge whenever `trigger` changes.
+/// One soft pulse on the island edge whenever `trigger` changes.
 private struct IslandFlash<S: InsettableShape>: ViewModifier {
     let shape: S
     let trigger: Int
@@ -164,17 +156,15 @@ private struct IslandFlash<S: InsettableShape>: ViewModifier {
         content
             .overlay {
                 shape
-                    .strokeBorder(IslandChrome.electricGreen, lineWidth: 2)
-                    .shadow(color: IslandChrome.electricGreen.opacity(0.9), radius: 8)
+                    .strokeBorder(Color.white.opacity(0.55), lineWidth: 1)
                     .opacity(glow)
                     .allowsHitTesting(false)
             }
             .onChange(of: trigger) {
                 Task { @MainActor in
-                    for value in [1.0, 0.2, 1.0, 0.0] {
-                        withAnimation(.easeInOut(duration: 0.18)) { glow = value }
-                        try? await Task.sleep(for: .milliseconds(220))
-                    }
+                    withAnimation(.easeOut(duration: 0.15)) { glow = 1 }
+                    try? await Task.sleep(for: .milliseconds(260))
+                    withAnimation(.easeIn(duration: 0.6)) { glow = 0 }
                 }
             }
     }
@@ -267,9 +257,8 @@ struct ActivityListView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(count > 0 ? "\(title) · \(count)" : title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            Text(count > 0 ? "\(title)  \(count)" : title)
+                .islandSectionLabel()
             content()
         }
     }
@@ -310,11 +299,11 @@ struct ActivityListView: View {
         case .passed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.caption2)
-                .foregroundStyle(IslandChrome.electricGreen)
+                .foregroundStyle(IslandChrome.positive)
         case .failed:
             Image(systemName: "xmark.circle.fill")
                 .font(.caption2)
-                .foregroundStyle(.orange)
+                .foregroundStyle(IslandChrome.ember)
         case .none:
             Image(systemName: "circle")
                 .font(.caption2)

@@ -49,7 +49,7 @@ enum PageCapture {
             _ = CGRequestScreenCaptureAccess()
         }
         guard hasScreenRecordingAccess else {
-            page.captureNote = "需要屏幕录制权限：系统设置 → 隐私与安全性 → 屏幕录制，勾选 grok岛 后重开 app。"
+            page.captureNote = "需要屏幕录制权限：系统设置 → 隐私与安全性 → 屏幕录制，勾选 NewIsland 后重开 app。"
             return page
         }
 

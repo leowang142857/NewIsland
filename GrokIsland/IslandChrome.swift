@@ -2,38 +2,68 @@ import AppKit
 import ImageIO
 import SwiftUI
 
-/// Shared chrome for the floating island: aurora sky glass, a thin aurora edge, spring reveal.
+/// Shared chrome for the floating island: a quiet ink surface, a hairline edge, spring reveal.
+///
+/// Color carries meaning only. `accent` marks the one thing you're interacting with; green,
+/// amber, orange, and red are task states. Everything else is white at some opacity.
 enum IslandChrome {
-    static let neonCyan = Color(red: 0.28, green: 0.96, blue: 1.0)
-    static let electricGreen = Color(red: 0.62, green: 0.98, blue: 0.45)
-    static let alertRed = Color(red: 1.0, green: 0.36, blue: 0.44)
-    static let amber = Color(red: 1.0, green: 0.80, blue: 0.30)
-    static let ember = Color(red: 1.0, green: 0.56, blue: 0.22)
+    static let name = "NewIsland"
 
-    static let cornerRadius: CGFloat = 16
+    static let accent = Color(red: 0.45, green: 0.64, blue: 1.0)
+    static let positive = Color(red: 0.42, green: 0.82, blue: 0.55)
+    static let danger = Color(red: 0.95, green: 0.42, blue: 0.42)
+    static let caution = Color(red: 0.96, green: 0.76, blue: 0.36)
+    static let ember = Color(red: 0.97, green: 0.58, blue: 0.30)
 
-    /// Thin neon rule between the island's layers.
-    static let layerRule = LinearGradient(
-        colors: [neonCyan.opacity(0), neonCyan.opacity(0.45), electricGreen.opacity(0.3), neonCyan.opacity(0)],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
+    /// Near-black, a touch warm, so it sits next to the notch without looking like a hole.
+    static let ink = Color(red: 0.075, green: 0.075, blue: 0.085)
+    static let surface = Color.white.opacity(0.055)
+    static let surfaceRaised = Color.white.opacity(0.09)
+    static let hairline = Color.white.opacity(0.08)
+    static let edge = Color.white.opacity(0.11)
 
-    static let borderGradient = LinearGradient(
-        colors: [
-            neonCyan.opacity(0.9),
-            electricGreen.opacity(0.7),
-            Color(red: 0.55, green: 0.36, blue: 0.95).opacity(0.85),
-            Color(red: 0.35, green: 0.75, blue: 1.0).opacity(0.85)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static let cornerRadius: CGFloat = 18
+    static let innerRadius: CGFloat = 9
 
     /// Paired with the panel frame timing in `IslandPanelController.applyFrame`.
-    static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.78, blendDuration: 0.1)
+    static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.86, blendDuration: 0.1)
 
-    static let revealTransition: AnyTransition = .scale(scale: 0.84, anchor: .top).combined(with: .opacity)
+    static let revealTransition: AnyTransition = .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
+}
+
+/// One-pixel divider between the island's layers.
+struct IslandHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(IslandChrome.hairline)
+            .frame(height: 1)
+            .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    /// Small grey label that names a section, in place of boxes and colored badges.
+    func islandSectionLabel() -> some View {
+        font(.system(size: 10, weight: .medium))
+            .tracking(0.3)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Borderless text field on a soft fill; reads as part of the island rather than a system box.
+    func islandField(highlighted: Bool = false) -> some View {
+        textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(IslandChrome.surface)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(highlighted ? IslandChrome.accent.opacity(0.8) : Color.clear, lineWidth: 1)
+            }
+    }
 }
 
 /// Colors sampled from the aurora photo, plus the island's own navy / neon blues.
@@ -120,6 +150,7 @@ private enum AuroraField {
 }
 
 /// Continuously shifting aurora sky: mesh gradient, light curtains, faint stars. No glyphs.
+/// Only drawn when the user turns up "aurora overlay" on a custom background.
 struct AuroraBackdrop: View {
     /// 0...1 strength of the bright curtains and stars.
     var glow: Double = 1
@@ -163,8 +194,8 @@ private struct AuroraSky: View {
     }
 }
 
-/// Dark frosted fill. Material is rearmost so it can blur the desktop; the aurora (or the
-/// user's own fill) sits on top of it, and a dark veil keeps white UI text readable.
+/// Dark frosted fill. Material is rearmost so it can blur the desktop; the ink (or the user's
+/// own fill) sits on top of it, and a dark veil keeps white UI text readable.
 struct IslandGlassBackdrop: View {
     var glow: Double = 1
     var style: IslandBackgroundStyle = .default
@@ -183,12 +214,12 @@ struct IslandGlassBackdrop: View {
                 }
                 customVeil
             } else {
-                AuroraBackdrop(glow: glow)
-                    .opacity(0.94)
+                IslandChrome.ink.opacity(0.94)
+                // Barely-there top light, so the surface has a direction without a gradient show.
                 LinearGradient(
-                    colors: [.black.opacity(0.24), .black.opacity(0.06), .black.opacity(0.34)],
+                    colors: [.white.opacity(0.035), .clear],
                     startPoint: .top,
-                    endPoint: .bottom
+                    endPoint: UnitPoint(x: 0.5, y: 0.35)
                 )
             }
         }
@@ -196,10 +227,10 @@ struct IslandGlassBackdrop: View {
         .accessibilityHidden(true)
     }
 
-    /// Nil means "use the stock aurora", including when the picked image can't be read.
+    /// Nil means "use the stock ink surface", including when the picked image can't be read.
     private var customFill: IslandBackgroundFill? {
         switch style.kind {
-        case .aurora:
+        case .standard:
             return nil
         case .solid, .gradient:
             return IslandBackgroundFill(style: style, image: nil)
@@ -227,7 +258,7 @@ struct IslandBackgroundFill: View {
 
     var body: some View {
         switch style.kind {
-        case .aurora:
+        case .standard:
             Color.clear
         case .solid:
             Rectangle().fill(Color(islandRGB: style.solid))
@@ -304,8 +335,8 @@ enum IslandBackgroundImageCache {
 }
 
 extension View {
-    /// Rounded (or capsule) aurora glass with a thin aurora stroke. Pass a custom `background`
-    /// to swap the aurora for the user's fill; the neon stroke stays either way.
+    /// Ink glass with a hairline edge. Pass a custom `background` to swap the ink for the
+    /// user's fill. `emphasized` (a drag over the island) turns the edge to the accent.
     func islandChrome<S: InsettableShape>(
         _ shape: S,
         glow: Double = 1,
@@ -320,21 +351,10 @@ extension View {
         .overlay {
             shape
                 .strokeBorder(
-                    IslandChrome.borderGradient,
+                    emphasized ? IslandChrome.accent : IslandChrome.edge,
                     lineWidth: emphasized ? 1.5 : 1
                 )
-                .shadow(
-                    color: IslandChrome.neonCyan.opacity(emphasized ? 0.9 : 0.45),
-                    radius: emphasized ? 5 : 3
-                )
                 .allowsHitTesting(false)
-        }
-        .overlay {
-            if emphasized {
-                shape
-                    .strokeBorder(IslandChrome.neonCyan.opacity(0.95), lineWidth: 1.5)
-                    .allowsHitTesting(false)
-            }
         }
     }
 }

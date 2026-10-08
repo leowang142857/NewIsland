@@ -341,7 +341,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = GrokIsland/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "grok岛";
+				INFOPLIST_KEY_CFBundleDisplayName = "NewIsland";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -369,7 +369,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = GrokIsland/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "grok岛";
+				INFOPLIST_KEY_CFBundleDisplayName = "NewIsland";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (

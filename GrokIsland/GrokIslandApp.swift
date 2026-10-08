@@ -8,7 +8,7 @@ struct GrokIslandApp: App {
     var body: some Scene {
         Settings {
             VStack(alignment: .leading, spacing: 8) {
-                Text("grok岛")
+                Text("NewIsland")
                     .font(.title3.weight(.semibold))
                 Text("The island panel is the main UI. This settings pane is a stub.")
                     .foregroundStyle(.secondary)

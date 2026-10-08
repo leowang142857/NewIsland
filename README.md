@@ -237,8 +237,8 @@ or run this on your Mac:
 ./scripts/make-desktop-shortcut.sh
 ```
 
-Both copy the app to `~/Applications/grok岛.app` and put a Finder alias named
-`grok岛` on your Desktop. The script also builds the Debug app first.
+Both copy the app to `~/Applications/NewIsland.app` and put a Finder alias named
+`NewIsland` on your Desktop. The script also builds the Debug app first.
 
 ---
 
@@ -254,7 +254,7 @@ Open the settings pane with the **gear** button on the island.
 | **接口地址** ("Base URL") | Shown for Ollama (default `http://127.0.0.1:11434/v1`) and for an OpenAI-compatible endpoint. |
 | **PR repository** | The `owner/name` repository whose open PRs drive the PR lights. Defaults to `leowang142857/GrokIsland`. |
 | **Screen Recording** | Shows whether the permission is granted, with a shortcut to System Settings. |
-| **Island background** | The expanded island's backdrop. Default is the built-in aurora glass; you can switch to solid color, gradient (presets or custom stops/angle), or an image from disk (with blur). Click **默认** ("Default") anytime to return to aurora while keeping your custom colors and image for later. |
+| **Island background** | The expanded island's backdrop. Default is a quiet near-black frosted glass; you can switch to solid color, gradient (presets or custom stops/angle), or an image from disk (with blur). Click **默认** ("Default") anytime to return to it while keeping your custom colors and image for later. |
 
 The first launch asks you to pick a service and paste a key. It does not assume
 Cursor. Modules, deadlines, and Local runs still work with nothing filled in;
@@ -267,12 +267,12 @@ that no Cursor key is set.
 
 ### Island background details
 
-- **Darken** lays a veil over the backdrop so white text and neon edges stay
+- **Darken** lays a veil over the backdrop so white text stays
   readable. Bright backgrounds raise the minimum veil automatically (images at
   least 18%), and Settings shows a hint when that happens.
 - **Opacity** lets the glass beneath show through when lowered. **Aurora overlay**
-  softly stacks the flowing aurora on a custom backdrop (set to 0 for a still
-  background).
+  softly stacks the old flowing aurora on a custom backdrop. It starts at 0 (a
+  still background).
 - Changes apply immediately; the island behind the settings pane is the live
   preview. **全部重置** ("Reset all") restores the default background and clears
   custom colors and the copied image.
@@ -280,7 +280,7 @@ that no Cursor key is set.
   `~/Library/Application Support/GrokIsland/backgrounds/` so the original can
   move or be deleted later; switching images removes the previous copy. Other
   options live in UserDefaults (`islandBackground`). The collapsed peek strip
-  always keeps the aurora look.
+  is always plain black so it blends into the notch.
 
 ---
 
@@ -379,7 +379,7 @@ on their own.
 | `TaskLightBoard` | One light per run, Cloud Agent, and PR |
 | `DeadlineStore` / `DeadlineParser` | Deadline persistence, free-text due-date parsing, energy and urgency |
 | `IslandSettings` / `IslandSettingsStorage` | Provider choice, API key files, model id, base URL, PR repository |
-| `IslandBackgroundStyle` | Expanded-island background (aurora / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
+| `IslandBackgroundStyle` | Expanded-island background (default / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
 
 ### Typical calls
 

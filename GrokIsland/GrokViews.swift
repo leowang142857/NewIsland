@@ -19,103 +19,88 @@ struct GrokQuickBar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 ForEach(shortcuts.indices, id: \.self) { index in
-                    shortcutButton(shortcuts[index])
-                }
-            }
-
-            HStack(spacing: 4) {
-                TextField("问 Grok（附当前页截图）", text: $question)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-                    .onSubmit { fireAsk() }
-                if capturing {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Button {
-                        fireAsk()
-                    } label: {
-                        Image(systemName: "paperplane.fill")
+                    ShortcutButton(shortcut: shortcuts[index], disabled: capturing) {
+                        fire(shortcuts[index])
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
 
-            splitRow
+            inputRow(
+                "问 Grok，会附上当前页面截图",
+                text: $question,
+                busy: capturing,
+                symbol: "arrow.up",
+                help: "发送",
+                submit: fireAsk
+            )
+
+            inputRow(
+                "拆分一个大任务，也可以把文件拖进来",
+                text: $splitDraft,
+                busy: splitting,
+                symbol: "arrow.triangle.branch",
+                help: "拆成 2–4 个子任务并行执行，完成后汇总成一条结果",
+                highlighted: splitTargeted,
+                submit: { fireSplit() }
+            )
+            .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
+                fireSplitDrop(providers)
+                return true
+            }
 
             if splitTargeted {
-                Text("松手后拆成 2–4 个子任务，并行执行后再汇总")
-                    .font(.caption2)
-                    .foregroundStyle(IslandChrome.neonCyan)
+                Text("松手后拆成 2–4 个子任务，各自跑完再汇总")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
 
             if let note {
                 Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 10))
+                    .foregroundStyle(IslandChrome.ember)
                     .lineLimit(3)
             }
         }
     }
 
-    private func shortcutButton(_ shortcut: ResolvedIslandShortcut) -> some View {
-        Button {
-            fire(shortcut)
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: shortcut.symbolName)
-                    .font(.caption)
-                Text(shortcut.title)
-                    .font(.caption2.weight(.medium))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(IslandChrome.neonCyan.opacity(0.08))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(IslandChrome.neonCyan.opacity(0.35), lineWidth: 1)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(capturing || !shortcut.isReady)
-        .help("截当前最前面的页面，交给 Grok \(shortcut.title)")
-    }
-
-    private var splitRow: some View {
-        HStack(spacing: 4) {
-            TextField("拆分任务（输入或拖入一个大任务）", text: $splitDraft)
-                .textFieldStyle(.roundedBorder)
-                .font(.caption)
-                .onSubmit { fireSplit() }
-            if splitting {
-                ProgressView().controlSize(.mini)
-            } else {
-                Button {
-                    fireSplit()
-                } label: {
-                    Image(systemName: "arrow.triangle.branch")
+    /// Text field with its action tucked inside the trailing edge.
+    private func inputRow(
+        _ placeholder: String,
+        text: Binding<String>,
+        busy: Bool,
+        symbol: String,
+        help: String,
+        highlighted: Bool = false,
+        submit: @escaping () -> Void
+    ) -> some View {
+        let empty = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return TextField(placeholder, text: text)
+            .onSubmit(submit)
+            .padding(.trailing, 22)
+            .islandField(highlighted: highlighted)
+            .overlay(alignment: .trailing) {
+                Group {
+                    if busy {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Button(action: submit) {
+                            Image(systemName: symbol)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(empty ? Color.white.opacity(0.3) : IslandChrome.ink)
+                                .frame(width: 18, height: 18)
+                                .background(Circle().fill(empty ? Color.clear : Color.white.opacity(0.9)))
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(empty)
+                        .help(help)
+                    }
                 }
-                .buttonStyle(.borderless)
-                .disabled(splitDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("拆成 2–4 个子任务并行执行，完成后汇总成一条结果")
+                .padding(.trailing, 4)
             }
-        }
-        .padding(2)
-        .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(IslandChrome.neonCyan.opacity(splitTargeted ? 0.9 : 0), lineWidth: 1)
-        }
-        .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
-            fireSplitDrop(providers)
-            return true
-        }
     }
 
     private func fire(_ shortcut: ResolvedIslandShortcut) {
@@ -180,6 +165,38 @@ struct GrokQuickBar: View {
     }
 }
 
+private struct ShortcutButton: View {
+    let shortcut: ResolvedIslandShortcut
+    let disabled: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: shortcut.symbolName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text(shortcut.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hovering ? IslandChrome.surfaceRaised : IslandChrome.surface)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .disabled(disabled || !shortcut.isReady)
+        .opacity(shortcut.isReady ? 1 : 0.45)
+        .help("截当前最前面的页面，交给 Grok \(shortcut.title)")
+    }
+}
+
 /// Full answer for one run, with copy / open-in-Cursor / delete. Answers stay in the journal.
 struct RunDetailView: View {
     let run: RunRecord
@@ -234,20 +251,18 @@ struct RunDetailView: View {
             }
 
             if let question = run.question {
-                HStack(alignment: .top, spacing: 5) {
-                    Text("问")
-                        .font(.caption2.weight(.heavy))
-                        .foregroundStyle(IslandChrome.neonCyan)
-                    Text(question)
-                        .font(.caption)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(6)
-                .background {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(IslandChrome.neonCyan.opacity(0.08))
-                }
+                Text(question)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 9)
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(Color.white.opacity(0.22))
+                            .frame(width: 2)
+                    }
+                    .padding(.vertical, 2)
             }
 
             if run.isActive {
@@ -302,24 +317,24 @@ struct MarkdownLite: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let line):
                     inline(line)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(IslandChrome.neonCyan)
-                        .padding(.top, 2)
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.top, 4)
                 case .paragraph(let line):
                     inline(line)
-                        .font(.caption)
+                        .font(.system(size: 12))
+                        .lineSpacing(2)
                 case .code(let code):
                     Text(code)
-                        .font(.system(size: 10, design: .monospaced))
-                        .padding(5)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .background(IslandChrome.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
             }
         }
@@ -510,7 +525,7 @@ struct SettingsPane: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 if !settings.isModelReady {
                     note(ModelProviderMessages.settingsHint)
                 }
@@ -557,7 +572,7 @@ struct SettingsPane: View {
                         Spacer()
                         Text(screenAccess ? "已开启" : "未开启")
                             .font(.caption2)
-                            .foregroundStyle(screenAccess ? IslandChrome.electricGreen : .orange)
+                            .foregroundStyle(screenAccess ? IslandChrome.positive : IslandChrome.ember)
                     }
                     if !screenAccess {
                         Button("打开系统设置") {
@@ -566,19 +581,17 @@ struct SettingsPane: View {
                         }
                         .buttonStyle(.borderless)
                         .font(.caption2)
-                        note("快捷按钮要截当前页面。勾选 grok岛 后重开 app。")
+                        note("快捷按钮要截当前页面。勾选 \(IslandChrome.name) 后重开 app。")
                     }
                 }
 
-                Rectangle()
-                    .fill(IslandChrome.layerRule)
-                    .frame(height: 1)
+                IslandHairline()
+                    .padding(.vertical, 2)
 
                 IslandShortcutSection(settings: settings)
 
-                Rectangle()
-                    .fill(IslandChrome.layerRule)
-                    .frame(height: 1)
+                IslandHairline()
+                    .padding(.vertical, 2)
 
                 IslandBackgroundSection(settings: settings)
             }
@@ -637,9 +650,9 @@ struct SettingsPane: View {
     }
 
     private var keyStatusColor: Color {
-        if settings.hasSelectedAPIKey { return IslandChrome.electricGreen }
+        if settings.hasSelectedAPIKey { return IslandChrome.positive }
         if settings.providerKind == .ollama { return Color.secondary }
-        return Color.orange
+        return IslandChrome.ember
     }
 
     private var providerModelSection: some View {

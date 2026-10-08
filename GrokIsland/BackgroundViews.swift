@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Settings block for the expanded island's background: the built-in aurora (default), or an
+/// Settings block for the expanded island's background: the built-in ink glass (default), or an
 /// opt-in solid, gradient, or photo.
 /// Edits apply live, so the island behind this screen is the preview.
 struct IslandBackgroundSection: View {
@@ -40,8 +40,8 @@ struct IslandBackgroundSection: View {
             .controlSize(.small)
 
             switch settings.background.kind {
-            case .aurora:
-                caption("内置的赛博毛玻璃霓虹极光，就是原来的样子。自定义的颜色和图片会保留，随时可以切回去。")
+            case .standard:
+                caption("深色磨砂底，和刘海一样安静。自定义过的颜色和图片会保留，随时可以切回去。")
             case .solid:
                 solidControls
             case .gradient:
@@ -57,7 +57,7 @@ struct IslandBackgroundSection: View {
             if let note {
                 Text(note)
                     .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(IslandChrome.ember)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -147,7 +147,7 @@ struct IslandBackgroundSection: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(hasImage ? "正在用自定义图片" : "还没选图片")
                         .font(.caption2.weight(.medium))
-                    caption(hasImage ? "已复制到 Application Support/GrokIsland/backgrounds" : "选好之前先显示极光。")
+                    caption(hasImage ? "已复制到 Application Support/GrokIsland/backgrounds" : "选好之前先用默认背景。")
                 }
                 Spacer(minLength: 0)
                 Button(hasImage ? "换一张…" : "选择图片…", action: pickImage)
@@ -168,7 +168,7 @@ struct IslandBackgroundSection: View {
                 .scaledToFill()
                 .frame(width: 44, height: 30)
                 .clipShape(shape)
-                .overlay { shape.strokeBorder(IslandChrome.neonCyan.opacity(0.5), lineWidth: 1) }
+                .overlay { shape.strokeBorder(IslandChrome.edge, lineWidth: 1) }
         } else {
             shape
                 .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
@@ -189,11 +189,11 @@ struct IslandBackgroundSection: View {
         return VStack(alignment: .leading, spacing: 3) {
             sliderRow("暗化", value: $settings.background.dim, in: IslandBackgroundStyle.dimRange, display: percent)
             if style.minimumDim > style.dim + 0.005 {
-                caption("这个背景偏亮，已自动暗化到 \(percent(style.effectiveDim))，保证文字和霓虹边框清楚。")
+                caption("这个背景偏亮，已自动暗化到 \(percent(style.effectiveDim))，免得文字看不清。")
             }
             sliderRow("不透明度", value: $settings.background.opacity, in: IslandBackgroundStyle.opacityRange, display: percent)
             sliderRow("极光叠加", value: $settings.background.auroraOverlay, in: IslandBackgroundStyle.auroraOverlayRange, display: percent)
-            caption("不透明度调低会透出毛玻璃；极光叠加把流动极光轻轻叠在背景上。")
+            caption("不透明度调低会透出毛玻璃。喜欢以前的流动极光，可以把极光叠加调上去。")
         }
     }
 
@@ -213,11 +213,10 @@ struct IslandBackgroundSection: View {
                 .frame(width: width, height: 16)
                 .overlay {
                     shape.strokeBorder(
-                        selected ? IslandChrome.neonCyan : Color.white.opacity(0.25),
+                        selected ? Color.white.opacity(0.9) : Color.white.opacity(0.15),
                         lineWidth: selected ? 1.5 : 1
                     )
                 }
-                .shadow(color: IslandChrome.neonCyan.opacity(selected ? 0.7 : 0), radius: 3)
                 .contentShape(shape)
         }
         .buttonStyle(.plain)
