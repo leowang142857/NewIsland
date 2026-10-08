@@ -102,6 +102,20 @@ enum ResourceIntake {
         return collected
     }
 
+    /// Files and folders only, for drops that keep the real files (the staging tray).
+    @MainActor
+    static func loadFileURLs(from providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        #if canImport(UniformTypeIdentifiers)
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            if let url = await loadTypedURL(from: provider, type: UTType.fileURL), url.isFileURL {
+                urls.append(url)
+            }
+        }
+        #endif
+        return urls
+    }
+
     @MainActor
     private static func loadItem(from provider: NSItemProvider) async -> ResourceItem? {
         if provider.canLoadObject(ofClass: URL.self) {

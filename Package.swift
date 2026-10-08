@@ -39,6 +39,7 @@ let package = Package(
                 "DeadlineViews.swift",
                 "RecordViews.swift",
                 "BackgroundViews.swift",
+                "FileTrayViews.swift",
                 "Info.plist",
                 "GrokIsland.entitlements",
                 "Assets.xcassets"
