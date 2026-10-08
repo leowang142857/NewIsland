@@ -12,6 +12,7 @@ struct ShellView: View {
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
+    @ObservedObject var tray: FileTray
 
     static let dropTypes: [UTType] = [.fileURL, .url, .plainText]
 
@@ -25,6 +26,7 @@ struct ShellView: View {
 
     private enum HomeTab: String, CaseIterable, Identifiable {
         case modules
+        case tray
         case records
 
         var id: String { rawValue }
@@ -32,6 +34,7 @@ struct ShellView: View {
         var title: String {
             switch self {
             case .modules: "功能模块"
+            case .tray: TrayPath.rootTitle
             case .records: "运行记录"
             }
         }
@@ -48,9 +51,18 @@ struct ShellView: View {
     @State private var shellDragActive = false
     @State private var dropTargetModuleID: UUID?
     @State private var dropMissNote: String?
+    @State private var trayDragActive = false
+    @State private var traySlotTargeted = false
+    @State private var trayTabTargeted = false
 
     private var isDragging: Bool {
         shellDragActive || presence.isDropTargeted || dropTargetModuleID != nil
+            || trayDragActive || traySlotTargeted || trayTabTargeted
+    }
+
+    /// Something from outside is being dragged in. Dragging files out of the tray does not count.
+    private var isReceivingFiles: Bool {
+        isDragging && !tray.isDraggingOut
     }
 
     var body: some View {
@@ -92,7 +104,7 @@ struct ShellView: View {
         .islandChrome(
             RoundedRectangle(cornerRadius: IslandChrome.cornerRadius, style: .continuous),
             glow: 0.85,
-            emphasized: isDragging,
+            emphasized: isReceivingFiles,
             background: settings.background,
             imageURL: settings.backgroundImageURL
         )
@@ -103,9 +115,16 @@ struct ShellView: View {
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
-        // Drops that miss every module tile land here: reject them and say why.
+        // Drops that miss every module tile (or the tray) land here: reject them and say why.
         .onDrop(of: Self.dropTypes, isTargeted: $shellDragActive) { _ in
-            showDropMiss()
+            if tray.isDraggingOut {
+                return false
+            }
+            if homeTab == .tray, route == .home {
+                tray.post("没落在暂存区里，这次什么也没放进来", problem: true)
+            } else {
+                showDropMiss()
+            }
             return false
         }
         // The peek strip is gone once the island expands mid-drag, so it never reports the
@@ -116,14 +135,28 @@ struct ShellView: View {
         .onChange(of: dropTargetModuleID) {
             if dropTargetModuleID == nil, !shellDragActive { presence.isDropTargeted = false }
         }
-        .onChange(of: isDragging) {
-            guard isDragging else { return }
+        // A drag brings up something that takes files: the modules, or the tray if it is open.
+        .onChange(of: isReceivingFiles) {
+            guard isReceivingFiles else { return }
             withAnimation(IslandChrome.expandSpring) {
                 route = .home
-                homeTab = .modules
+                if homeTab == .records { homeTab = .modules }
             }
         }
-        .onAppear { monitor.refreshSoon() }
+        // Spring-loaded like a Finder folder: hold a drag on 暂存 and the tray opens.
+        .onChange(of: trayTabTargeted) {
+            guard trayTabTargeted, homeTab != .tray else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                if trayTabTargeted, homeTab != .tray {
+                    withAnimation(.easeInOut(duration: 0.15)) { homeTab = .tray }
+                }
+            }
+        }
+        .onAppear {
+            monitor.refreshSoon()
+            tray.refresh()
+        }
     }
 
     private var header: some View {
@@ -283,6 +316,8 @@ struct ShellView: View {
             switch homeTab {
             case .modules:
                 moduleLayer
+            case .tray:
+                FileTrayLayer(tray: tray, dragActive: $trayDragActive)
             case .records:
                 RunJournalList(engine: engine) { id in route = .run(id) }
             }
@@ -320,22 +355,20 @@ struct ShellView: View {
     private var layerTabs: some View {
         HStack(spacing: 14) {
             ForEach(HomeTab.allCases) { tab in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { homeTab = tab }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(tab.title)
-                            .foregroundStyle(homeTab == tab ? Color.primary : Color.secondary)
-                        if tab == .records, !engine.runs.isEmpty {
-                            Text("\(engine.runs.count)")
-                                .monospacedDigit()
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .font(.system(size: 12, weight: homeTab == tab ? .semibold : .regular))
-                    .contentShape(Rectangle())
+                if tab == .tray {
+                    tabButton(tab)
+                        .onDrop(of: TrayDrop.types, delegate: TrayDropTarget(
+                            targeted: $trayTabTargeted,
+                            operation: { TrayDrop.proposal(into: "", tray: tray) },
+                            perform: { providers in
+                                showTray()
+                                return TrayDrop.accept(providers, into: "", tray: tray)
+                            }
+                        ))
+                        .help("拖进来先放着，要用时再拖回桌面")
+                } else {
+                    tabButton(tab)
                 }
-                .buttonStyle(.plain)
             }
             Spacer()
             if homeTab == .modules {
@@ -355,6 +388,37 @@ struct ShellView: View {
                 .help("新建模块")
             }
         }
+    }
+
+    private func tabButton(_ tab: HomeTab) -> some View {
+        let selected = homeTab == tab
+        let targeted = tab == .tray && trayTabTargeted
+        let count: Int? = switch tab {
+        case .modules: nil
+        case .tray: tray.rootCount
+        case .records: engine.runs.count
+        }
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { homeTab = tab }
+        } label: {
+            HStack(spacing: 4) {
+                Text(tab.title)
+                    .foregroundStyle(targeted ? IslandChrome.accent : (selected ? Color.primary : Color.secondary))
+                if let count, count > 0 {
+                    Text("\(count)")
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .font(.system(size: 12, weight: selected ? .semibold : .regular))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func showTray() {
+        tray.open("")
+        withAnimation(.easeInOut(duration: 0.15)) { homeTab = .tray }
     }
 
     private var moduleLayer: some View {
@@ -395,11 +459,15 @@ struct ShellView: View {
                     }
                     .padding(2)
                 }
-                if !isDragging {
-                    Text("把文件或链接拖到模块上就会执行")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
+            }
+
+            if isReceivingFiles {
+                TrayDropSlot(tray: tray, targeted: $traySlotTargeted, onDropped: showTray)
+                    .transition(.opacity)
+            } else if !engine.modules.isEmpty {
+                Text("把文件或链接拖到模块上就会执行")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
             }
         }
         .animation(IslandChrome.expandSpring, value: isDragging)

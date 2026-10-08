@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }()
     lazy var monitor = CloudActivityMonitor(storage: settings.storage)
+    let tray = FileTray()
     private var panelController: IslandPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -48,7 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine: engine,
             monitor: monitor,
             settings: settings,
-            deadlines: deadlines
+            deadlines: deadlines,
+            tray: tray
         )
         panelController?.show()
         monitor.start()

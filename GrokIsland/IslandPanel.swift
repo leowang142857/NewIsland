@@ -78,8 +78,10 @@ final class IslandPresence: ObservableObject {
     @Published var isDropTargeted = false
     @Published var isHoveringPanel = false
 
-    func shouldHold(engine: IslandEngine) -> Bool {
-        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil || Self.systemPickerIsOpen
+    /// A drag out of the tray keeps the island up: its source row must outlive the drag.
+    func shouldHold(engine: IslandEngine, tray: FileTray) -> Bool {
+        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil
+            || tray.isDraggingOut || Self.systemPickerIsOpen
     }
 
     /// The file picker and color panel float outside the island. Retracting under them would
@@ -100,6 +102,7 @@ final class IslandPanelController {
 
     private let engine: IslandEngine
     private let settings: IslandSettings
+    private let tray: FileTray
     let presence = IslandPresence()
     private let panel: IslandPanel
     private var screenObserver: NSObjectProtocol?
@@ -111,10 +114,12 @@ final class IslandPanelController {
         engine: IslandEngine,
         monitor: CloudActivityMonitor,
         settings: IslandSettings,
-        deadlines: DeadlineStore
+        deadlines: DeadlineStore,
+        tray: FileTray
     ) {
         self.engine = engine
         self.settings = settings
+        self.tray = tray
         let screen = ScreenAnchor.preferredScreen()
         let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize(on: screen), on: screen)
         panel = IslandPanel(contentRect: frame)
@@ -123,7 +128,8 @@ final class IslandPanelController {
             presence: presence,
             monitor: monitor,
             settings: settings,
-            deadlines: deadlines
+            deadlines: deadlines,
+            tray: tray
         )
         let host = FirstMouseHostingView(rootView: root)
         host.wantsLayer = true
@@ -166,8 +172,13 @@ final class IslandPanelController {
     }
 
     private func tick() {
+        // A drag that ends off the island (say, back on the desktop) never reaches a drop target
+        // to clear this, and the island would stay held open. A released button means it is over.
+        if presence.isDropTargeted, NSEvent.pressedMouseButtons & 1 == 0 {
+            presence.isDropTargeted = false
+        }
         if presence.isRevealed {
-            if mouseInHotZone() || presence.shouldHold(engine: engine) {
+            if mouseInHotZone() || presence.shouldHold(engine: engine, tray: tray) {
                 cancelRetract()
             } else {
                 scheduleRetract()
@@ -213,7 +224,7 @@ final class IslandPanelController {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.retractWork = nil
-            if !self.mouseInHotZone(), !self.presence.shouldHold(engine: self.engine) {
+            if !self.mouseInHotZone(), !self.presence.shouldHold(engine: self.engine, tray: self.tray) {
                 self.setRevealed(false)
             }
         }
@@ -289,6 +300,7 @@ struct IslandRootView: View {
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
+    let tray: FileTray
 
     var body: some View {
         ZStack {
@@ -298,7 +310,8 @@ struct IslandRootView: View {
                     presence: presence,
                     monitor: monitor,
                     settings: settings,
-                    deadlines: deadlines
+                    deadlines: deadlines,
+                    tray: tray
                 )
                 .transition(IslandChrome.revealTransition)
             } else {
