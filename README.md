@@ -37,8 +37,9 @@ platform-independent Swift package (`GrokIslandCore`) with its own test suite.
   around. When collapsed it is a thin **peek strip**.
 - **Hover over the peek strip** to slide the island open. Move the pointer away
   and it retracts after about half a second. It stays open while it is pinned
-  (pin button in the header), while you drag something over it, and while a
-  Local run is waiting for your confirmation.
+  (pin button in the header), while you drag something over it, while you drag
+  files out of the staging tray, and while a Local run is waiting for your
+  confirmation.
 - A **collapse lock** sits at the left end of the peek strip. Click it (it turns
   amber) to keep the island collapsed even when the pointer is over the strip or
   you drag files across it; click again to unlock. Hovering the lock itself does
@@ -55,7 +56,8 @@ When expanded, the island is organized in layers, from top to bottom:
 1. **Task lights** — one light per running or recently finished task.
 2. **DDL energy bar** — all open deadlines in one bar.
 3. **Grok quick actions** — three one-tap buttons plus an "Ask Grok" field.
-4. **Modules / run records** — your module grid, or the history of runs.
+4. **Modules / staging tray / run records** — your module grid, the files you
+   parked on the island, or the history of runs.
 
 When collapsed, the peek strip shows the collapse lock on the far left, then up
 to a few task lights (two lights plus a count when there are more than three),
@@ -91,6 +93,42 @@ Drop feedback is explicit so you always know what happened:
 **Local runs are always confirmed.** The module prompt is never executed as a
 shell command. Only a command you type into the confirmation dialog is run
 (with `/bin/zsh`), and only after you confirm it.
+
+### Staging tray (暂存)
+
+The **暂存** ("Staging") tab is a shelf for files you want off the Desktop for
+now: park them on the island, sort them into folders, and drag them back out
+when you need them.
+
+- **Drag files or folders in.** Drop them on the tray list, on the 暂存 tab, or,
+  while dragging over the modules, on the **或者先放进暂存区** ("or park it in
+  the tray") slot under the grid. Hold a drag on the 暂存 tab for a moment and
+  the tray opens, like a spring-loaded Finder folder.
+- **Moved or copied, as in Finder.** By default a file from the same disk is
+  moved into the tray, so it leaves the Desktop; from another disk it is copied.
+  Hold ⌥ while dropping to do the opposite once, or change the default in the
+  tray's **⋯** menu (移进来，原处不留 "move in" / 拷贝一份，原文件不动 "copy").
+  If an original can't be moved (locked, or macOS refuses), the tray keeps a
+  copy and says the original stayed where it was.
+- **Nothing is overwritten.** A second `报告.pdf` arrives as `报告 2.pdf`.
+- **Organize inside.** Make a folder with the folder-plus button and name it in
+  place. Double-click a folder to open it and use the breadcrumb to go back;
+  double-click a file to open it in its default app. Drag rows onto a folder or a
+  breadcrumb to move them, or use **移到…** ("Move to…") to pick any folder.
+  **归入新文件夹** ("Group into new folder") gathers the selection into a fresh
+  folder. Rename from the right-click menu.
+- **Multi-select** like Finder: click, ⌘-click to toggle, ⇧-click for a range,
+  or **全选** ("Select all") in the ⋯ menu.
+- **Delete** moves items to the macOS Trash after a one-line confirmation, so
+  they can be put back.
+- **Drag back out to reclaim.** Drag a row, or the whole selection, to the
+  Desktop or a Finder window. On the same disk Finder moves it out of the tray,
+  and the tray says how many came back; hold ⌥ in Finder to leave a copy in the
+  tray. The island stays open until the drag ends.
+- The tray is a real folder, `~/Library/Application Support/GrokIsland/tray/`,
+  and that folder is all of its state: it survives relaunches, and whatever you
+  put there from Finder (**⋯ → 在 Finder 中显示** "Show in Finder") shows up in
+  the tray.
 
 ### Deadlines and the DDL energy bar
 
@@ -302,6 +340,10 @@ that no Cursor key is set.
 - **Automation (Apple Events)** is requested the first time the app reads a
   browser's current URL.
 - Accessibility and Input Monitoring are **not** requested.
+- **Files and Folders** access (Desktop, Documents, Downloads) may be requested
+  the first time you move a file from one of those folders into the staging
+  tray, because moving removes it from there. If you decline, the tray copies
+  the file instead and leaves the original in place.
 - The app is not sandboxed and uses the outgoing network client entitlement.
 - Content you send (screenshots, URLs, inlined files, your prompt) goes to the
   provider you selected. With Cursor selected, it also appears as a Cloud Agent
@@ -319,6 +361,7 @@ Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
 | `deadlines.json` | Your deadlines |
 | `run-journal.json` | Run records, including Grok answers |
 | `backgrounds/` | Copies of custom island background images |
+| `tray/` | The staging tray: the parked files and folders themselves |
 | `cursor-api-key` | Cursor API key (`0600`), if you use Cloud Agents |
 | `xai-api-key` | xAI API key (`0600`) |
 | `openai-api-key` | OpenAI API key (`0600`) |
@@ -326,8 +369,9 @@ Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
 | `ollama-api-key` | Optional Ollama key (`0600`) |
 | `compatible-api-key` | OpenAI-compatible API key (`0600`) |
 
-The selected provider, model ids, Ollama or compatible base URL, and PR
-repository are stored in the app's user defaults. An older install with only
+The selected provider, model ids, Ollama or compatible base URL, PR
+repository, and the tray's move-or-copy default (`trayDropMode`) are stored in
+the app's user defaults. An older install with only
 `cursor-api-key` and no provider choice keeps using Cursor.
 
 ---
@@ -336,8 +380,8 @@ repository are stored in the app's user defaults. An older install with only
 
 The app itself needs macOS and Xcode, but the `GrokIslandCore` package — module
 storage, drop intake, the run state machine, executors, the model-provider and
-chat-completions clients, the Cursor API client, deadline parsing, and activity
-monitoring — builds without a UI. Its XCTest
+chat-completions clients, the Cursor API client, deadline parsing, activity
+monitoring, and the staging tray's file operations — builds without a UI. Its XCTest
 suite runs on macOS and on Linux.
 
 ```bash
@@ -380,6 +424,7 @@ on their own.
 | `DeadlineStore` / `DeadlineParser` | Deadline persistence, free-text due-date parsing, energy and urgency |
 | `IslandSettings` / `IslandSettingsStorage` | Provider choice, API key files, model id, base URL, PR repository |
 | `IslandBackgroundStyle` | Expanded-island background (default / solid / gradient / image) and its readability veil; persisted by `IslandSettingsStorage` |
+| `FileTray` / `TrayFileSystem` | Staging tray: the folder being shown, Finder-style selection, and move / copy / rename / delete on the `tray/` folder, which is the only record kept |
 
 ### Typical calls
 
@@ -431,6 +476,7 @@ GrokIsland/
   GrokViews.swift             # quick actions, run detail, settings pane
   BackgroundViews.swift       # settings section for the island background
   RecordViews.swift           # run records (filter, clear, multi-select delete)
+  FileTrayViews.swift         # staging tray tab, AppKit drag-out rows, drop targets
   PageCapture.swift           # frontmost-window screenshot and browser URL
   DesktopShortcut.swift       # ~/Applications copy + Desktop alias
   IslandEngine.swift          # facade used by the UI
@@ -446,6 +492,7 @@ GrokIsland/
   RunJournal.swift            # persisted run records
   TaskLights.swift            # per-task lights
   Deadlines.swift             # deadline store, parser, energy
+  FileTray.swift              # staging tray model and file operations
   IslandSettings.swift        # API key file and preferences
 Tests/GrokIslandCoreTests/    # XCTest suite for GrokIslandCore
 scripts/
