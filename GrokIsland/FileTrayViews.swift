@@ -704,36 +704,28 @@ enum TrayDrop {
         urls.filter(\.isFileURL).map { ($0 as NSURL).filePathURL ?? $0 }
     }
 
-    static func mode(for tray: FileTray, option: Bool) -> TrayDropMode {
-        option ? tray.dropMode.flipped : tray.dropMode
-    }
-
-    /// Cursor for a SwiftUI target, which cannot read the dragged URLs until the drop. During a
-    /// drag out of the tray the paths are known; anything else follows the drop mode and ⌥.
+    /// Cursor for a SwiftUI target, which cannot read the dragged URLs until the drop.
     static func proposal(into folder: String, tray: FileTray) -> DropOperation? {
-        if tray.isDraggingOut {
-            return TrayPath.canMove(tray.draggedPaths, into: folder) ? .move : nil
+        switch tray.dropIntent(for: nil, into: folder, option: NSEvent.modifierFlags.contains(.option)) {
+        case .refuse: nil
+        case .move: .move
+        case .copy: .copy
         }
-        return mode(for: tray, option: NSEvent.modifierFlags.contains(.option)) == .move ? .move : .copy
     }
 
-    /// Tray items onto a folder they are not already in move; files from outside follow the drop mode.
     static func operation(for urls: [URL], into folder: String, tray: FileTray, option: Bool) -> NSDragOperation {
-        let inside = urls.compactMap { tray.fileSystem.relativePath(of: $0) }
-        if !urls.isEmpty, inside.count == urls.count {
-            return TrayPath.canMove(inside, into: folder) ? .move : []
+        switch tray.dropIntent(for: urls, into: folder, option: option) {
+        case .refuse: []
+        case .move: .move
+        case .copy: .copy
         }
-        return mode(for: tray, option: option) == .move ? .move : .copy
     }
 
     @discardableResult
     static func accept(_ urls: [URL], into folder: String, tray: FileTray, option: Bool, allowsMove: Bool = true) -> Bool {
-        let inside = urls.compactMap { tray.fileSystem.relativePath(of: $0) }
-        if !urls.isEmpty, inside.count == urls.count, !TrayPath.canMove(inside, into: folder) {
-            return false
-        }
-        let chosen = allowsMove ? mode(for: tray, option: option) : .copy
-        Task { await tray.receive(urls, into: folder, mode: chosen) }
+        let intent = tray.dropIntent(for: urls, into: folder, option: option, sourceAllowsMove: allowsMove)
+        guard let mode = intent.mode else { return false }
+        Task { await tray.receive(urls, into: folder, mode: mode) }
         return true
     }
 

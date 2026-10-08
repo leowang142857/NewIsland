@@ -414,6 +414,27 @@ final class TrayReportTests: XCTestCase {
         XCTAssertEqual(TrayDropMode.move.flipped, .copy)
         XCTAssertEqual(TrayDropMode.copy.flipped, .move)
     }
+
+    func testOutsideFilesFollowTheModeOptionAndTheSourceApp() {
+        XCTAssertEqual(TrayDropIntent.forOutsideFiles(mode: .move, option: false), .move)
+        XCTAssertEqual(TrayDropIntent.forOutsideFiles(mode: .move, option: true), .copy)
+        XCTAssertEqual(TrayDropIntent.forOutsideFiles(mode: .copy, option: false), .copy)
+        XCTAssertEqual(TrayDropIntent.forOutsideFiles(mode: .copy, option: true), .move)
+        XCTAssertEqual(
+            TrayDropIntent.forOutsideFiles(mode: .move, option: false, sourceAllowsMove: false), .copy,
+            "an app that only offers copies never loses its file"
+        )
+        XCTAssertEqual(TrayDropIntent.forOutsideFiles(mode: .copy, option: true, sourceAllowsMove: false), .copy)
+    }
+
+    func testTrayItemsOnlyMoveAndOnlyWhereSomethingChanges() {
+        XCTAssertEqual(TrayDropIntent.forTrayItems(["a.txt"], into: "归档"), .move)
+        XCTAssertEqual(TrayDropIntent.forTrayItems(["归档/a.txt"], into: ""), .move)
+        XCTAssertEqual(TrayDropIntent.forTrayItems(["a.txt"], into: ""), .refuse, "already there")
+        XCTAssertEqual(TrayDropIntent.forTrayItems(["归档"], into: "归档/旧"), .refuse, "a folder cannot go inside itself")
+        XCTAssertNil(TrayDropIntent.refuse.mode)
+        XCTAssertEqual(TrayDropIntent.copy.mode, .copy)
+    }
 }
 
 @MainActor
@@ -539,6 +560,29 @@ final class FileTrayModelTests: XCTestCase {
         XCTAssertFalse(tray.isDraggingOut)
         XCTAssertEqual(tray.entries.map(\.name), ["留下.txt"])
         XCTAssertEqual(tray.notice?.text, "已拿回 1 项，还有 1 项留在暂存区")
+    }
+
+    func testDropIntentTellsTrayItemsFromNewFiles() async throws {
+        let box = try TraySandbox()
+        try box.trayFolder("归档")
+        let inTray = try box.trayFile("a.txt")
+        let fromDesktop = try box.desktopFile("new.txt")
+        let tray = makeTray(box)
+
+        XCTAssertEqual(tray.dropIntent(for: [inTray], into: "", option: false), .refuse)
+        XCTAssertEqual(tray.dropIntent(for: [inTray], into: "归档", option: true), .move, "⌥ does not copy within the tray")
+        XCTAssertEqual(tray.dropIntent(for: [fromDesktop], into: "", option: false), .move)
+        XCTAssertEqual(tray.dropIntent(for: [fromDesktop], into: "", option: true), .copy)
+        XCTAssertEqual(tray.dropIntent(for: [inTray, fromDesktop], into: "", option: false), .move, "a mix counts as new files")
+        XCTAssertEqual(tray.dropIntent(for: [fromDesktop], into: "", option: false, sourceAllowsMove: false), .copy)
+
+        tray.dropMode = .copy
+        XCTAssertEqual(tray.dropIntent(for: nil, into: "", option: false), .copy, "unknown URLs from outside follow the mode")
+
+        tray.beginDragOut(["a.txt"])
+        XCTAssertEqual(tray.dropIntent(for: nil, into: "", option: false), .refuse, "a drag out stands in for unknown URLs")
+        XCTAssertEqual(tray.dropIntent(for: nil, into: "归档", option: false), .move)
+        await tray.finishDragOut(droppedOutside: false, operationWasCopy: false, cancelled: true)
     }
 
     func testDragOutThatStaysInsideTheIslandSaysNothing() async throws {

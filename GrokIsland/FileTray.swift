@@ -184,6 +184,36 @@ enum TrayDropMode: String, CaseIterable, Identifiable, Sendable {
     var flipped: TrayDropMode { self == .move ? .copy : .move }
 }
 
+/// What a drop onto a tray folder would do, decided while the drag hovers. The UI turns it into
+/// the cursor badge and then performs the same thing on drop.
+enum TrayDropIntent: Equatable, Sendable {
+    /// Nothing would change, e.g. tray items dropped on the folder they are already in.
+    case refuse
+    case move
+    case copy
+
+    /// Items already in the tray only ever move between its folders.
+    static func forTrayItems(_ paths: [String], into folder: String) -> TrayDropIntent {
+        TrayPath.canMove(paths, into: folder) ? .move : .refuse
+    }
+
+    /// Files from elsewhere follow the drop mode, flipped while ⌥ is held. An app that only lets
+    /// its files be copied gets a copy whatever the mode.
+    static func forOutsideFiles(mode: TrayDropMode, option: Bool, sourceAllowsMove: Bool = true) -> TrayDropIntent {
+        guard sourceAllowsMove else { return .copy }
+        return (option ? mode.flipped : mode) == .move ? .move : .copy
+    }
+
+    /// The mode to hand `FileTray.receive`, or nil when the drop should be turned away.
+    var mode: TrayDropMode? {
+        switch self {
+        case .refuse: nil
+        case .move: .move
+        case .copy: .copy
+        }
+    }
+}
+
 struct TrayFailure: Equatable, Sendable {
     var name: String
     var reason: String
@@ -849,6 +879,22 @@ final class FileTray: ObservableObject {
             post(report.summary, problem: !report.failures.isEmpty)
         }
         return report
+    }
+
+    /// What dropping onto `folder` would do. Pass nil `urls` from targets that only learn them at
+    /// the drop (SwiftUI); during a drag out of the tray its paths stand in for them.
+    func dropIntent(for urls: [URL]?, into folder: String, option: Bool, sourceAllowsMove: Bool = true) -> TrayDropIntent {
+        let insidePaths: [String]?
+        if let urls {
+            let paths = urls.compactMap { fileSystem.relativePath(of: $0) }
+            insidePaths = !urls.isEmpty && paths.count == urls.count ? paths : nil
+        } else {
+            insidePaths = isDraggingOut ? draggedPaths : nil
+        }
+        if let insidePaths {
+            return .forTrayItems(insidePaths, into: folder)
+        }
+        return .forOutsideFiles(mode: dropMode, option: option, sourceAllowsMove: sourceAllowsMove)
     }
 
     func beginDragOut(_ paths: [String]) {
