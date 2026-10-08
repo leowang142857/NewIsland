@@ -99,6 +99,7 @@ final class IslandPanelController {
     static let pollInterval: TimeInterval = 0.08
 
     private let engine: IslandEngine
+    private let staging: StagingTrayStore
     private let settings: IslandSettings
     let presence = IslandPresence()
     private let panel: IslandPanel
@@ -109,17 +110,20 @@ final class IslandPanelController {
 
     init(
         engine: IslandEngine,
+        staging: StagingTrayStore,
         monitor: CloudActivityMonitor,
         settings: IslandSettings,
         deadlines: DeadlineStore
     ) {
         self.engine = engine
+        self.staging = staging
         self.settings = settings
         let screen = ScreenAnchor.preferredScreen()
         let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize(on: screen), on: screen)
         panel = IslandPanel(contentRect: frame)
         let root = IslandRootView(
             engine: engine,
+            staging: staging,
             presence: presence,
             monitor: monitor,
             settings: settings,
@@ -285,6 +289,7 @@ final class IslandPanelController {
 
 struct IslandRootView: View {
     @ObservedObject var engine: IslandEngine
+    @ObservedObject var staging: StagingTrayStore
     @ObservedObject var presence: IslandPresence
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
@@ -298,12 +303,20 @@ struct IslandRootView: View {
                     presence: presence,
                     monitor: monitor,
                     settings: settings,
-                    deadlines: deadlines
+                    deadlines: deadlines,
+                    staging: staging
                 )
                 .transition(IslandChrome.revealTransition)
             } else {
-                PeekStripView(engine: engine, presence: presence, monitor: monitor, settings: settings, deadlines: deadlines)
-                    .transition(IslandChrome.revealTransition)
+                PeekStripView(
+                    engine: engine,
+                    staging: staging,
+                    presence: presence,
+                    monitor: monitor,
+                    settings: settings,
+                    deadlines: deadlines
+                )
+                .transition(IslandChrome.revealTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -319,6 +332,7 @@ struct IslandRootView: View {
 /// camera and only the two wings show. Everything else waits for the expanded island.
 struct PeekStripView: View {
     @ObservedObject var engine: IslandEngine
+    @ObservedObject var staging: StagingTrayStore
     @ObservedObject var presence: IslandPresence
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
@@ -334,7 +348,8 @@ struct PeekStripView: View {
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
-        // Dragging over the strip only reveals the shell; resources are dropped onto a module tile.
+        // Dragging over the strip only reveals the shell. Drop on a module tile to run it,
+        // or on the staging well to park a copy.
         .onDrop(of: ShellView.dropTypes, isTargeted: dropBinding) { _ in
             false
         }
@@ -359,8 +374,14 @@ struct PeekStripView: View {
 
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                if let next, next.urgency(now: now).isPressing {
-                    DeadlineBadge(item: next, now: now)
+                VStack(alignment: .trailing, spacing: 0) {
+                    if staging.stagedItemCount > 0 {
+                        StagingCountBadge(count: staging.stagedItemCount)
+                    }
+                    if let next, next.urgency(now: now).isPressing {
+                        DeadlineBadge(item: next, now: now)
+                            .scaleEffect(staging.stagedItemCount > 0 ? 0.86 : 1, anchor: .trailing)
+                    }
                 }
             }
             .padding(.trailing, PeekStrip.trailingInset)

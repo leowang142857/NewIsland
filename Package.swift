@@ -31,6 +31,7 @@ let package = Package(
                 "GrokIslandApp.swift",
                 "IslandPanel.swift",
                 "ShellView.swift",
+                "StagingTrayViews.swift",
                 "IslandChrome.swift",
                 "DesktopShortcut.swift",
                 "PageCapture.swift",

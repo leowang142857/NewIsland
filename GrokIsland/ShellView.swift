@@ -12,6 +12,7 @@ struct ShellView: View {
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
+    @ObservedObject var staging: StagingTrayStore
 
     static let dropTypes: [UTType] = [.fileURL, .url, .plainText]
 
@@ -25,6 +26,7 @@ struct ShellView: View {
 
     private enum HomeTab: String, CaseIterable, Identifiable {
         case modules
+        case staging
         case records
 
         var id: String { rawValue }
@@ -32,6 +34,7 @@ struct ShellView: View {
         var title: String {
             switch self {
             case .modules: "功能模块"
+            case .staging: "暂存"
             case .records: "运行记录"
             }
         }
@@ -48,9 +51,10 @@ struct ShellView: View {
     @State private var shellDragActive = false
     @State private var dropTargetModuleID: UUID?
     @State private var dropMissNote: String?
+    @State private var trayDropActive = false
 
     private var isDragging: Bool {
-        shellDragActive || presence.isDropTargeted || dropTargetModuleID != nil
+        shellDragActive || presence.isDropTargeted || dropTargetModuleID != nil || trayDropActive
     }
 
     var body: some View {
@@ -119,7 +123,7 @@ struct ShellView: View {
             guard isDragging else { return }
             withAnimation(IslandChrome.expandSpring) {
                 route = .home
-                homeTab = .modules
+                if homeTab != .staging { homeTab = .modules }
             }
         }
         .onAppear { monitor.refreshSoon() }
@@ -260,6 +264,8 @@ struct ShellView: View {
             switch homeTab {
             case .modules:
                 moduleLayer
+            case .staging:
+                StagingTrayPage(store: staging)
             case .records:
                 RunJournalList(engine: engine) { id in route = .run(id) }
             }
@@ -311,6 +317,11 @@ struct ShellView: View {
                         Text(tab.title)
                         if tab == .records, !engine.runs.isEmpty {
                             Text("\(engine.runs.count)")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        if tab == .staging, staging.stagedItemCount > 0 {
+                            Text("\(staging.stagedItemCount)")
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
@@ -383,6 +394,7 @@ struct ShellView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            StagingDropWell(store: staging, folderID: nil, isTargeted: $trayDropActive, compact: true)
         }
         .animation(IslandChrome.expandSpring, value: isDragging)
     }
@@ -391,12 +403,19 @@ struct ShellView: View {
     private var dropBanner: some View {
         let target = dropTargetModuleID.flatMap { id in engine.modules.first { $0.id == id } }
         let missed = dropMissNote != nil && !isDragging
-        let tint = missed ? IslandChrome.alertRed : (target == nil ? IslandChrome.neonCyan : IslandChrome.electricGreen)
+        let tint = missed
+            ? IslandChrome.alertRed
+            : (trayDropActive ? IslandChrome.electricGreen : (target == nil ? IslandChrome.neonCyan : IslandChrome.electricGreen))
         return HStack(spacing: 6) {
             Image(systemName: missed ? "xmark.octagon.fill" : (target == nil ? "hand.point.down.fill" : "tray.and.arrow.down.fill"))
                 .font(.caption)
             if missed, let dropMissNote {
                 Text(dropMissNote)
+                    .font(.caption2.weight(.semibold))
+            } else if trayDropActive || homeTab == .staging {
+                Text(staging.moveFromDesktop
+                     ? "松手暂存。只有桌面上的文件会在复制成功后移走"
+                     : "松手复制进暂存托盘，原文件留在原地")
                     .font(.caption2.weight(.semibold))
             } else if let target {
                 Text("松手发送到「\(target.displayName)」")
@@ -406,7 +425,7 @@ struct ShellView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
-                Text("拖到下面的模块方块上，松手即执行")
+                Text("拖到模块方块上执行，或拖到下面的暂存托盘")
                     .font(.caption2.weight(.semibold))
             }
             Spacer(minLength: 0)
@@ -526,7 +545,9 @@ struct ShellView: View {
     }
 
     private func showDropMiss() {
-        let note = "没放到模块方块上，这次没有发送"
+        let note = homeTab == .staging
+            ? "没放到暂存区上，这次没有放进托盘"
+            : "没放到模块方块上，这次没有发送"
         withAnimation { dropMissNote = note }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2.2))
