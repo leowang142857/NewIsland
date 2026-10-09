@@ -521,9 +521,12 @@ Issues and pull requests are welcome.
 - Tray drop targets read the file URLs from the drag pasteboard inside the drop
   callback and pass them straight to `TrayDrop.accept`, which starts their
   security-scoped access and calls `FileTray.take` before the callback returns.
-  Don't cache them from hovering, load them later from an `NSItemProvider`, or
-  start the transfer in a `Task`: those URLs can lack the drop's access, and
-  Desktop files then fail with "Operation not permitted".
+  Access is started on `TrayDropAccess.urls`, and those same values are what
+  gets moved or copied; don't remap them (`standardizedFileURL`, `filePathURL`,
+  a path round trip) in between. Don't cache them from hovering, load them later
+  from an `NSItemProvider`, or start the transfer in a `Task` either: those URLs
+  can lack the drop's access, and Desktop files then fail with "Operation not
+  permitted".
 - Never commit API keys or other credentials.
 
 No license file has been added yet.

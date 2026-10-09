@@ -321,6 +321,20 @@ final class TrayFileSystemTests: XCTestCase {
         XCTAssertTrue(box.exists(copied))
     }
 
+    func testFileOperationsGetTheDroppedURLNotAStandardizedCopy() throws {
+        let box = try TraySandbox()
+        try box.desktopFile("a.txt", "as dropped")
+        let dropped = URL(fileURLWithPath: box.desktop.path + "/./a.txt")
+        XCTAssertNotEqual(dropped, dropped.standardizedFileURL, "precondition: standardizing would make a new value")
+
+        let (_, copies) = box.fileSystem.moveIn([dropped], into: "", mode: .copy)
+        XCTAssertEqual(copies.map(\.source), [dropped], "the value the drop's access was started on")
+
+        let report = box.fileSystem.copyIn(copies, into: "")
+        XCTAssertEqual(report.copied, ["a.txt"], "named after the file, not the ./ segment")
+        XCTAssertEqual(box.text("a.txt"), "as dropped")
+    }
+
     func testAnOriginalThatCannotBeMovedIsCopied() async throws {
         let box = try TraySandbox()
         let readOnly = try box.desktopFolder("只读", files: ["kept.txt": "kept"])
@@ -557,6 +571,21 @@ final class TrayReportTests: XCTestCase {
         XCTAssertEqual(log.stopped, [a, b, plain], "a forgotten access still ends")
     }
 
+    func testTheFilesToTransferAreExactlyTheURLsAccessStartedOn() {
+        let log = AccessLog()
+        let a = URL(fileURLWithPath: "/tmp/桌面/a.txt")
+        let plain = URL(fileURLWithPath: "/tmp/下载/plain.txt")
+        let link = URL(string: "https://x.ai")!
+
+        let drop = log.access([a, link, plain], granted: { $0 != plain })
+
+        XCTAssertEqual(drop.urls, [a, plain], "a URL whose access did not start is still brought in")
+        XCTAssertEqual(log.started, drop.urls, "access starts on the very values the tray moves or copies")
+        XCTAssertEqual(drop.startedCount, 1)
+        XCTAssertEqual(TrayInbound.filePath(a), a, "a path URL is not rebuilt")
+    }
+
+
     func testDropModeFlips() {
         XCTAssertEqual(TrayDropMode.move.flipped, .copy)
         XCTAssertEqual(TrayDropMode.copy.flipped, .move)
@@ -609,10 +638,9 @@ final class FileTrayModelTests: XCTestCase {
     func testEmptyDropSaysNothingWasTaken() async throws {
         let tray = makeTray(try TraySandbox())
         let log = AccessLog()
-        let link = URL(string: "https://x.ai")!
-        await tray.receive([], access: log.access([link]))
+        await tray.take(log.access([URL(string: "https://x.ai")!])).value
         XCTAssertEqual(tray.notice?.isProblem, true)
-        XCTAssertEqual(log.stopped, [link])
+        XCTAssertEqual(log.started, [], "a link is neither started nor brought in")
     }
 
     func testADropMovesBeforeTakeReturnsThenEndsItsAccess() async throws {
@@ -621,7 +649,7 @@ final class FileTrayModelTests: XCTestCase {
         let a = try box.desktopFile("a.txt")
         let log = AccessLog()
 
-        let task = tray.take([a], access: log.access([a]))
+        let task = tray.take(log.access([a]))
 
         // No await yet: still inside the drop callback, as far as the drop is concerned.
         XCTAssertTrue(box.exists(box.root.appendingPathComponent("a.txt")))
@@ -644,7 +672,7 @@ final class FileTrayModelTests: XCTestCase {
         let log = AccessLog()
 
         let report = try await box.withPermissions(0o555, on: readOnly) { () async -> TrayTransferReport in
-            let task = tray.take([moved, kept], mode: .move, access: log.access([moved, kept]))
+            let task = tray.take(log.access([moved, kept]), mode: .move)
 
             XCTAssertEqual(tray.entries.map(\.name), ["moved.txt"], "the rename shows up right away")
             XCTAssertTrue(tray.isImporting)

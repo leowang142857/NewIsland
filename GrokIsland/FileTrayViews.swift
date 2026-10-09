@@ -726,17 +726,17 @@ enum TrayDrop {
         }
     }
 
-    /// `urls` exactly as read from the pasteboard: their access starts before anything else.
+    /// `urls` exactly as read from the pasteboard. `TrayDropAccess` turns them into real paths,
+    /// starts their access, and its `urls` are the only list used from here on.
     @discardableResult
     static func accept(_ urls: [URL], into folder: String, tray: FileTray, option: Bool, allowsMove: Bool = true) -> Bool {
-        let access = TrayDropAccess(urls)
-        let files = TrayInbound.fileURLs(urls)
-        let intent = tray.dropIntent(for: files, into: folder, option: option, sourceAllowsMove: allowsMove)
+        let drop = TrayDropAccess(urls)
+        let intent = tray.dropIntent(for: drop.urls, into: folder, option: option, sourceAllowsMove: allowsMove)
         guard let mode = intent.mode else {
-            access.end()
+            drop.end()
             return false
         }
-        tray.take(files, into: folder, mode: mode, access: access)
+        tray.take(drop, into: folder, mode: mode)
         return true
     }
 
@@ -746,7 +746,7 @@ enum TrayDrop {
     static func accept(_ providers: [NSItemProvider], into folder: String, tray: FileTray) -> Bool {
         let option = NSEvent.modifierFlags.contains(.option)
         let urls = fileURLs(on: NSPasteboard(name: .drag))
-        if !urls.isEmpty {
+        if isThisDrop(urls, providers: providers, tray: tray) {
             return accept(urls, into: folder, tray: tray, option: option)
         }
         Task { @MainActor in
@@ -754,6 +754,13 @@ enum TrayDrop {
             accept(urls, into: folder, tray: tray, option: option)
         }
         return true
+    }
+
+    /// The shared drag pasteboard should hold the drop SwiftUI is reporting, not one left from an
+    /// earlier drag: as many files as providers, and tray items only while dragging out of the tray.
+    private static func isThisDrop(_ urls: [URL], providers: [NSItemProvider], tray: FileTray) -> Bool {
+        guard !urls.isEmpty, urls.count == providers.count else { return false }
+        return tray.isDraggingOut || !urls.contains { tray.fileSystem.relativePath(of: $0) != nil }
     }
 }
 

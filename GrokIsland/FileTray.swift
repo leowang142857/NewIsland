@@ -206,17 +206,35 @@ enum TrayError: LocalizedError, Equatable {
 /// until the move or copy is done. Ending it early, or working from a URL rebuilt from a path or
 /// from bytes, can fail with "Operation not permitted" for protected folders like Desktop and
 /// Downloads, also with the app sandbox off.
+///
+/// So `urls` is the one list for both: access is started on exactly these values, and these same
+/// values are what the tray moves or copies. Nothing may remap them in between (no
+/// `standardizedFileURL`, `filePathURL` or path round trip before the file operation).
 final class TrayDropAccess: @unchecked Sendable {
+    /// The files to bring in, in drop order: real file paths, each the same value access was started
+    /// on. A URL whose access did not start (a plain drop with nothing to start) is kept all the same.
+    let urls: [URL]
+    /// How many URLs access actually started for, for the log when a drop fails.
+    let startedCount: Int
     private let lock = NSLock()
     private var held: [URL]
+    /// The pasteboard's own URL objects, kept alive with the access they may carry.
+    private var dropped: [URL]
     private let stop: @Sendable (URL) -> Void
 
     init(
-        _ urls: [URL],
+        _ dropped: [URL],
         start: (URL) -> Bool = TrayDropAccess.startScoped,
         stop: @escaping @Sendable (URL) -> Void = TrayDropAccess.stopScoped
     ) {
-        held = urls.filter(start)
+        let files = dropped.filter(\.isFileURL)
+        let urls = files.map(TrayInbound.filePath)
+        // A file reference URL can carry access its path URL lacks, so start both.
+        let replaced = zip(files, urls).compactMap { original, path in original == path ? nil : original }
+        self.urls = urls
+        held = (urls + replaced).filter(start)
+        startedCount = held.count
+        self.dropped = dropped
         self.stop = stop
     }
 
@@ -225,6 +243,7 @@ final class TrayDropAccess: @unchecked Sendable {
         lock.lock()
         let released = held
         held = []
+        dropped = []
         lock.unlock()
         released.forEach(stop)
     }
@@ -248,9 +267,19 @@ final class TrayDropAccess: @unchecked Sendable {
 
 /// File URLs handed over by a drop, in whatever shape the pasteboard used.
 enum TrayInbound {
-    /// File URLs only, as real paths: Finder can hand over file reference URLs (`/.file/id=…`).
+    /// File URLs only, as real paths.
     static func fileURLs(_ urls: [URL]) -> [URL] {
-        urls.filter(\.isFileURL).map { ($0 as NSURL).filePathURL ?? $0 }
+        urls.filter(\.isFileURL).map(filePath)
+    }
+
+    /// The path URL for a file reference URL (`/.file/id=…`, which Finder can hand over). Any other
+    /// URL comes back as the very same value, so access started on it still applies.
+    static func filePath(_ url: URL) -> URL {
+        #if canImport(Darwin)
+        let reference = url as NSURL
+        if reference.isFileReferenceURL(), let path = reference.filePathURL { return path }
+        #endif
+        return url
     }
 
     /// A `public.file-url` item as `NSItemProvider.loadItem` returns it: a URL, its data
@@ -526,36 +555,39 @@ struct TrayFileSystem: Sendable {
         var inside: [String] = []
         var copies: [TrayPendingCopy] = []
         for source in sources where source.isFileURL {
-            let original = source.standardizedFileURL
-            guard seen.insert(original.path).inserted else { continue }
-            if let path = relativePath(of: original) {
+            // `source` itself goes to the file operations: it is the value a drop's access was
+            // started on (see `TrayDropAccess`). The standardized copy is only for comparing.
+            let key = source.standardizedFileURL
+            guard seen.insert(key.path).inserted else { continue }
+            if let path = relativePath(of: key) {
                 inside.append(path)
                 continue
             }
-            let name = original.lastPathComponent
-            guard !Self.isMissing(original) else {
+            let name = key.lastPathComponent
+            guard !Self.isMissing(source) else {
                 report.failures.append(TrayFailure(name: name, reason: "原文件找不到了"))
                 continue
             }
-            guard !swallowsTray(original) else {
+            guard !swallowsTray(source) else {
                 report.failures.append(TrayFailure(name: name, reason: TrayError.containsTray.localizedDescription))
                 continue
             }
-            guard mode == .move, Self.sameVolume(original, target) else {
-                copies.append(TrayPendingCopy(source: original, wantedMove: mode == .move))
+            guard mode == .move, Self.sameVolume(source, target) else {
+                copies.append(TrayPendingCopy(source: source, wantedMove: mode == .move))
                 continue
             }
 
-            let (destination, path) = landing(for: original, in: target, folder: folder)
+            let (destination, path) = landing(for: source, named: name, in: target, folder: folder)
             do {
-                try FileManager.default.moveItem(at: original, to: destination)
+                try FileManager.default.moveItem(at: source, to: destination)
                 report.moved.append(path)
             } catch {
+                Self.log("move \(source.path)", error)
                 if Self.itemExists(at: destination) {
                     report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
                 } else {
-                    // A locked or read-only original can still be copied.
-                    copies.append(TrayPendingCopy(source: original, wantedMove: true))
+                    // A locked original, or one macOS won't let go of, may still be copied.
+                    copies.append(TrayPendingCopy(source: source, wantedMove: true))
                 }
             }
         }
@@ -575,17 +607,27 @@ struct TrayFileSystem: Sendable {
         }
         let fm = FileManager.default
         for copy in copies {
-            let (destination, path) = landing(for: copy.source, in: target, folder: folder)
+            let name = copy.source.standardizedFileURL.lastPathComponent
+            let (destination, path) = landing(for: copy.source, named: name, in: target, folder: folder)
             do {
                 try fm.copyItem(at: copy.source, to: destination)
                 report.copied.append(path)
                 if copy.wantedMove { report.keptOriginals += 1 }
             } catch {
+                Self.log("copy \(copy.source.path)", error)
                 try? fm.removeItem(at: destination)
-                report.failures.append(TrayFailure(name: copy.source.lastPathComponent, reason: TrayError.describe(error)))
+                report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
             }
         }
         return report
+    }
+
+    /// macOS's own error goes to the system log (Console: `GrokIsland FileTray`), so a refusal
+    /// can be told apart from a missing grant after the fact.
+    static func log(_ action: String, _ error: Error) {
+        #if os(macOS)
+        NSLog("GrokIsland FileTray: %@", "\(action) failed: \(error)")
+        #endif
     }
 
     private func existingFolder(_ folder: String) -> URL? {
@@ -598,8 +640,8 @@ struct TrayFileSystem: Sendable {
     }
 
     /// Where `original` lands in `target`, numbered Finder-style if the name is taken.
-    private func landing(for original: URL, in target: URL, folder: String) -> (url: URL, path: String) {
-        let finalName = TrayNaming.uniqueName(original.lastPathComponent, isFolder: Self.isFolder(at: original)) {
+    private func landing(for original: URL, named name: String, in target: URL, folder: String) -> (url: URL, path: String) {
+        let finalName = TrayNaming.uniqueName(name, isFolder: Self.isFolder(at: original)) {
             Self.itemExists(at: target.appendingPathComponent($0))
         }
         return (target.appendingPathComponent(finalName), TrayPath.join(folder, finalName))
@@ -969,20 +1011,21 @@ final class FileTray: ObservableObject {
     ///
     /// Call it from the drop callback itself. Renames (tray moves, same-disk moves from Finder)
     /// are done before it returns, while the access that came with the drop is certainly valid.
-    /// Copies continue off the main thread, and `access` is held until the last one is done.
+    /// Copies continue off the main thread, and the access is held until the last one is done.
+    /// The files are `drop.urls` and nothing else, so they are the values access was started on.
     @discardableResult
-    func take(_ urls: [URL], into target: String? = nil, mode: TrayDropMode? = nil, access: TrayDropAccess? = nil) -> Task<TrayTransferReport, Never> {
+    func take(_ drop: TrayDropAccess, into target: String? = nil, mode: TrayDropMode? = nil) -> Task<TrayTransferReport, Never> {
         let destination = target ?? folder
-        guard !urls.isEmpty else {
-            access?.end()
+        guard !drop.urls.isEmpty else {
+            drop.end()
             post("只收文件和文件夹，这次什么也没放进来", problem: true)
             return Task { TrayTransferReport() }
         }
         let chosen = mode ?? dropMode
-        let (renamed, copies) = fileSystem.moveIn(urls, into: destination, mode: chosen)
+        let (renamed, copies) = fileSystem.moveIn(drop.urls, into: destination, mode: chosen)
         guard !copies.isEmpty else {
-            access?.end()
-            finish(renamed, destination: destination)
+            drop.end()
+            finish(renamed, destination: destination, drop: drop)
             return Task { renamed }
         }
         if !renamed.arrived.isEmpty { refresh() }
@@ -990,20 +1033,20 @@ final class FileTray: ObservableObject {
         importsInFlight += 1
         return Task {
             let copied = await Task.detached(priority: .userInitiated) {
-                defer { access?.end() }
+                defer { drop.end() }
                 return fileSystem.copyIn(copies, into: destination)
             }.value
             importsInFlight -= 1
             var report = renamed
             report.merge(copied)
-            finish(report, destination: destination)
+            finish(report, destination: destination, drop: drop)
             return report
         }
     }
 
     @discardableResult
-    func receive(_ urls: [URL], into target: String? = nil, mode: TrayDropMode? = nil, access: TrayDropAccess? = nil) async -> TrayTransferReport {
-        await take(urls, into: target, mode: mode, access: access).value
+    func receive(_ urls: [URL], into target: String? = nil, mode: TrayDropMode? = nil) async -> TrayTransferReport {
+        await take(TrayDropAccess(urls), into: target, mode: mode).value
     }
 
     @discardableResult
@@ -1124,7 +1167,13 @@ final class FileTray: ObservableObject {
         notice = TrayNotice(text: text, isProblem: problem)
     }
 
-    private func finish(_ report: TrayTransferReport, destination: String) {
+    private func finish(_ report: TrayTransferReport, destination: String, drop: TrayDropAccess? = nil) {
+        if let drop, !report.failures.isEmpty {
+            TrayFileSystem.log(
+                "drop of \(drop.urls.count) (access started for \(drop.startedCount))",
+                TrayError.failed(report.failures.map { "\($0.name): \($0.reason)" }.joined(separator: "; "))
+            )
+        }
         refresh()
         let landedHere = report.arrived.filter { TrayPath.parent(of: $0) == folder }
         if destination == folder, !landedHere.isEmpty {
