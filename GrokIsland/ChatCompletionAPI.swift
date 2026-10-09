@@ -145,7 +145,7 @@ enum ChatCompletionParser {
     }
 }
 
-/// Ask Grok and the shortcut buttons, through chat completions.
+/// Ask Grok and the shortcut buttons, through the provider's own message API.
 struct ChatCompletionGrokClient: GrokBotClient {
     var configuration: ModelProviderConfiguration
     var transport: any HTTPTransport = URLSessionTransport()
@@ -157,13 +157,12 @@ struct ChatCompletionGrokClient: GrokBotClient {
         let payload = GrokPromptBuilder.build(request)
         let label = configuration.model.isEmpty ? configuration.kind.settingsTitle : configuration.model
         await progress(ExecutionProgress(fraction: 0.2, message: "正在请求 \(label)…"))
-        let text = try await ChatCompletionClient(
-            kind: configuration.kind,
-            apiKey: configuration.apiKey,
-            model: configuration.model,
-            baseURL: configuration.baseURL,
+        let text = try await HostedModelAPI.complete(
+            configuration: configuration,
+            prompt: payload.text,
+            images: payload.images,
             transport: transport
-        ).complete(prompt: payload.text, images: payload.images)
+        )
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         await progress(ExecutionProgress(fraction: 1, message: "已收到回复"))
         return ExecutionResult(
@@ -173,7 +172,37 @@ struct ChatCompletionGrokClient: GrokBotClient {
     }
 }
 
-/// Picks Cursor Cloud Agents or chat completions from the saved provider.
+/// One prompt on the selected hosted model. Cursor Cloud Agents stays on its own client.
+enum HostedModelAPI {
+    static func complete(
+        configuration: ModelProviderConfiguration,
+        prompt: String,
+        images: [PromptImage],
+        transport: any HTTPTransport
+    ) async throws -> String {
+        switch configuration.kind {
+        case .anthropic:
+            return try await AnthropicMessagesClient(
+                apiKey: configuration.apiKey,
+                model: configuration.model,
+                baseURL: configuration.baseURL,
+                transport: transport
+            ).complete(prompt: prompt, images: images)
+        case .xai, .openai, .deepseek, .ollama, .compatible:
+            return try await ChatCompletionClient(
+                kind: configuration.kind,
+                apiKey: configuration.apiKey,
+                model: configuration.model,
+                baseURL: configuration.baseURL,
+                transport: transport
+            ).complete(prompt: prompt, images: images)
+        case .cursor:
+            throw IslandError.executorFailed(ModelProviderMessages.notReady(.cursor))
+        }
+    }
+}
+
+/// Picks Cursor Cloud Agents or a hosted model API from the saved provider.
 struct RoutedGrokClient: GrokBotClient {
     var resolve: @Sendable () -> ModelProviderResolution
     var transport: any HTTPTransport = URLSessionTransport()
@@ -203,7 +232,7 @@ struct RoutedGrokClient: GrokBotClient {
 }
 
 /// Split-task when the provider is a plain model API: planner, parallel subtasks, then a summary.
-/// Each step is one chat completion. Worker failures stay in the journal the same way cloud agents do.
+/// Each step is one model call. Worker failures stay in the journal the same way cloud agents do.
 struct ChatSplitTaskOrchestrator: SplitTaskCollaborating {
     var configuration: ModelProviderConfiguration
     var transport: any HTTPTransport = URLSessionTransport()
@@ -360,19 +389,18 @@ struct ChatSplitTaskOrchestrator: SplitTaskCollaborating {
         progress: @escaping @Sendable (ExecutionProgress) async -> Void
     ) async throws -> String {
         await progress(ExecutionProgress(fraction: 0.2, message: activity))
-        let text = try await ChatCompletionClient(
-            kind: configuration.kind,
-            apiKey: configuration.apiKey,
-            model: configuration.model,
-            baseURL: configuration.baseURL,
+        let text = try await HostedModelAPI.complete(
+            configuration: configuration,
+            prompt: prompt,
+            images: images,
             transport: transport
-        ).complete(prompt: prompt, images: images)
+        )
         await progress(ExecutionProgress(fraction: 1, message: activity))
         return text
     }
 }
 
-/// Split-task router. Cursor keeps the cloud-agent orchestrator; other providers use model calls.
+/// Split-task router. Cursor keeps the cloud-agent orchestrator; other providers use their model API.
 struct RoutedSplitTaskOrchestrator: SplitTaskCollaborating {
     var resolve: @Sendable () -> ModelProviderResolution
     var transport: any HTTPTransport = URLSessionTransport()

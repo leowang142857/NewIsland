@@ -64,6 +64,26 @@ private func imageURLs(_ body: [String: Any]) -> [String] {
     }
 }
 
+private func anthropicOK(_ text: String) -> (Int, String) {
+    let object: [String: Any] = [
+        "id": "msg_test",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+            ["type": "thinking", "thinking": "内部推理，不应展示"],
+            ["type": "text", "text": text]
+        ],
+        "stop_reason": "end_turn"
+    ]
+    let data = try! JSONSerialization.data(withJSONObject: object)
+    return (200, String(decoding: data, as: UTF8.self))
+}
+
+private func anthropicContent(_ body: [String: Any]) -> [[String: Any]] {
+    let messages = body["messages"] as? [[String: Any]]
+    return messages?.first?["content"] as? [[String: Any]] ?? []
+}
+
 private func chatOK(_ text: String) -> (Int, String) {
     let object: [String: Any] = [
         "choices": [["message": ["role": "assistant", "content": text]]]
@@ -103,6 +123,7 @@ final class ModelProviderSettingsTests: XCTestCase {
         XCTAssertNil(resolution.configuration)
         XCTAssertNil(storage.credentials())
         XCTAssertTrue(resolution.notReadyMessage.contains("选一个服务"))
+        XCTAssertTrue(resolution.notReadyMessage.contains("Anthropic（Claude）"))
         XCTAssertTrue(resolution.notReadyMessage.contains("Ollama"))
         XCTAssertFalse(resolution.notReadyMessage.contains("还没有 Cursor"))
     }
@@ -167,6 +188,57 @@ final class ModelProviderSettingsTests: XCTestCase {
 
         storage.setBaseURLString("file:///tmp/nope", for: .compatible)
         XCTAssertNil(storage.makeConfiguration(for: .compatible))
+    }
+
+    func testAnthropicKeyIsSeparateAndUsesTheDefaultModel() throws {
+        let (folder, storage) = temporaryStorage()
+        try storage.saveAPIKey("crsr_keep")
+        try storage.saveAPIKey("xai-keep", for: .xai)
+        storage.storedProviderKind = .anthropic
+        XCTAssertNil(storage.resolveProvider().configuration)
+        XCTAssertTrue(storage.resolveProvider().notReadyMessage.contains("Anthropic（Claude）"))
+
+        try storage.saveAPIKey("  sk-ant-secret \n", for: .anthropic)
+        let resolution = try XCTUnwrap(storage.resolveProvider().configuration)
+        XCTAssertEqual(resolution.kind, .anthropic)
+        XCTAssertEqual(resolution.apiKey, "sk-ant-secret")
+        XCTAssertEqual(resolution.model, ModelProviderKind.anthropic.defaultModel)
+        XCTAssertEqual(resolution.baseURL.absoluteString, "https://api.anthropic.com")
+        XCTAssertEqual(storage.loadAPIKey(), "crsr_keep")
+        XCTAssertEqual(storage.loadAPIKey(for: .xai), "xai-keep")
+        XCTAssertEqual(storage.modelID(for: .openai), "gpt-4o")
+
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: folder.appendingPathComponent("anthropic-api-key").path
+        )
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+
+        storage.setModelID(" claude-haiku-5-5 ", for: .anthropic)
+        XCTAssertEqual(storage.modelID(for: .anthropic), "claude-haiku-5-5")
+        XCTAssertEqual(storage.modelID(for: .openai), "gpt-4o")
+        XCTAssertEqual(storage.loadAPIKey(for: .openai), nil)
+
+        try storage.saveAPIKey(nil, for: .anthropic)
+        XCTAssertNil(storage.loadAPIKey(for: .anthropic))
+        XCTAssertEqual(storage.loadAPIKey(), "crsr_keep")
+        XCTAssertEqual(storage.loadAPIKey(for: .xai), "xai-keep")
+    }
+
+    func testAnthropicProviderMetadata() {
+        let kind = ModelProviderKind.anthropic
+        XCTAssertEqual(kind.settingsTitle, "Anthropic（Claude）")
+        XCTAssertEqual(kind.defaultModel, "claude-sonnet-5-5")
+        XCTAssertEqual(kind.defaultBaseURL, "https://api.anthropic.com")
+        XCTAssertEqual(kind.modelPlaceholder, "claude-sonnet-5-5")
+        XCTAssertEqual(kind.keyPlaceholder, "sk-ant-…")
+        XCTAssertEqual(kind.secretFileName, "anthropic-api-key")
+        XCTAssertEqual(kind.docsURL, URL(string: "https://console.anthropic.com/settings/keys"))
+        XCTAssertEqual(kind.docsLinkTitle, "获取 API key")
+        XCTAssertEqual(kind.keySectionTitle, "API key")
+        XCTAssertTrue(kind.requiresAPIKey)
+        XCTAssertFalse(kind.allowsCustomBaseURL)
+        XCTAssertTrue(ModelProviderKind.allCases.contains(.anthropic))
+        XCTAssertTrue(ModelProviderMessages.settingsHint.contains("Anthropic（Claude）"))
     }
 
     func testExplicitCursorWithoutAKeyStillNamesCursor() {
@@ -338,6 +410,121 @@ final class ChatCompletionClientTests: XCTestCase {
         }
     }
 
+    func testAnthropicMessagesSendsImagesAsContentBlocks() async throws {
+        let png = PromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")
+        let secret = "sk-ant-test-key"
+        let transport = ScriptedHTTP { _ in anthropicOK("### 第 1 题\n答案：42") }
+        let client = ChatCompletionGrokClient(
+            configuration: config(.anthropic, key: secret, model: "claude-sonnet-5-5", base: "https://api.anthropic.com"),
+            transport: transport
+        )
+        let result = try await client.execute(sampleRequest(images: [png])) { _ in }
+        XCTAssertEqual(result.summary, "第 1 题")
+        XCTAssertEqual(result.detail, "### 第 1 题\n答案：42")
+
+        let request = try XCTUnwrap(transport.snapshot().first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.absoluteString, "https://api.anthropic.com/v1/messages")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), secret)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), AnthropicMessagesClient.apiVersion)
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+        let body = jsonObject(request)
+        XCTAssertEqual(body["model"] as? String, "claude-sonnet-5-5")
+        XCTAssertEqual(body["max_tokens"] as? Int, AnthropicMessagesClient.maxTokens)
+        XCTAssertNil(body["temperature"])
+        let content = anthropicContent(body)
+        XCTAssertEqual(content.count, 2)
+        XCTAssertEqual(content[0]["type"] as? String, "image")
+        let source = try XCTUnwrap(content[0]["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "base64")
+        XCTAssertEqual(source["media_type"] as? String, "image/png")
+        XCTAssertEqual(source["data"] as? String, png.data.base64EncodedString())
+        XCTAssertEqual(content[1]["type"] as? String, "text")
+        let text = try XCTUnwrap(content[1]["text"] as? String)
+        XCTAssertTrue(text.contains("解答附图题目"))
+        XCTAssertTrue(text.contains("https://example.com"))
+        XCTAssertFalse(text.contains(secret))
+        let raw = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+        XCTAssertFalse(raw.contains(secret))
+        XCTAssertFalse(raw.contains("image_url"))
+    }
+
+    func testAnthropicEndpointAndParser() throws {
+        XCTAssertEqual(
+            AnthropicMessagesClient.endpoint(base: URL(string: "https://api.anthropic.com")!).absoluteString,
+            "https://api.anthropic.com/v1/messages"
+        )
+        XCTAssertEqual(
+            AnthropicMessagesClient.endpoint(base: URL(string: "https://api.anthropic.com/")!).absoluteString,
+            "https://api.anthropic.com/v1/messages"
+        )
+        XCTAssertEqual(
+            AnthropicMessagesClient.endpoint(base: URL(string: "https://api.anthropic.com/v1")!).absoluteString,
+            "https://api.anthropic.com/v1/messages"
+        )
+        XCTAssertEqual(
+            AnthropicMessagesClient.endpoint(base: URL(string: "https://api.anthropic.com/v1/messages")!).absoluteString,
+            "https://api.anthropic.com/v1/messages"
+        )
+
+        let mixed = try AnthropicMessagesParser.assistantText(from: Data(
+            #"{"content":[{"type":"thinking","thinking":"先想想"},{"type":"text","text":"第一段"},{"type":"text","text":"第二段"}]}"#.utf8
+        ))
+        XCTAssertEqual(mixed, "第一段\n第二段")
+        XCTAssertThrowsError(try AnthropicMessagesParser.assistantText(from: Data(
+            #"{"content":[{"type":"thinking","thinking":"只有推理"}]}"#.utf8
+        )))
+    }
+
+    func testAnthropicHTTPErrorRedactsTheKey() async {
+        let secret = "sk-ant-super-secret"
+        let transport = ScriptedHTTP { _ in
+            (401, #"{"type":"error","error":{"type":"authentication_error","message":"bad \#(secret)"}}"#)
+        }
+        let client = AnthropicMessagesClient(
+            apiKey: secret,
+            model: "claude-sonnet-5-5",
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            transport: transport
+        )
+        do {
+            _ = try await client.complete(prompt: "hi", images: [])
+            XCTFail("expected 401")
+        } catch let error as IslandError {
+            XCTAssertTrue(error.localizedDescription.contains("401"))
+            XCTAssertFalse(error.localizedDescription.contains(secret))
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
+    func testAnthropicImageRejectionIsReadable() async {
+        let secret = "sk-ant-super-secret"
+        let transport = ScriptedHTTP { _ in
+            (400, #"{"type":"error","error":{"type":"invalid_request_error","message":"This model does not support image input for \#(secret)"}}"#)
+        }
+        let client = AnthropicMessagesClient(
+            apiKey: secret,
+            model: "claude-sonnet-5-5",
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            transport: transport
+        )
+        let png = PromptImage(data: Data([9]), mimeType: "image/png")
+        do {
+            _ = try await client.complete(prompt: "看这张图", images: [png])
+            XCTFail("expected the image rejection")
+        } catch let error as IslandError {
+            let text = error.localizedDescription
+            XCTAssertTrue(text.contains("不能接收图片"))
+            XCTAssertTrue(text.contains("claude-sonnet-5-5"))
+            XCTAssertFalse(text.contains(secret))
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
     func testParserReadsStringAndPartContent() throws {
         let string = try ChatCompletionParser.assistantText(from: Data(#"{"choices":[{"message":{"content":"你好"}}]}"#.utf8))
         XCTAssertEqual(string, "你好")
@@ -354,12 +541,18 @@ final class ChatCompletionClientTests: XCTestCase {
 
 /// Canned chat completions for the model-API split orchestrator.
 private final class ChatSplitHTTP: HTTPTransport, @unchecked Sendable {
+    enum ReplyWire: Sendable {
+        case chatCompletions
+        case anthropicMessages
+    }
+
     struct Script: Sendable {
         var planner: String
         var worker: @Sendable (String) -> (Int, String)
         var summaryStatus: Int = 200
         var summaryText: String = "汇总完成"
         var workerDelay: Duration = .milliseconds(1)
+        var wire: ReplyWire = .chatCompletions
     }
 
     private let lock = NSLock()
@@ -401,19 +594,26 @@ private final class ChatSplitHTTP: HTTPTransport, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if isWorker { inFlightWorkers -= 1 }
-        if prompt.contains("你是规划 agent") { return chatOK(script.planner) }
+        if prompt.contains("你是规划 agent") { return ok(script.planner) }
         if prompt.contains("你是汇总 agent") {
             if script.summaryStatus != 200 {
                 return (script.summaryStatus, #"{"error":{"message":"summary down"}}"#)
             }
-            return chatOK(script.summaryText)
+            return ok(script.summaryText)
         }
         if isWorker {
             let (status, text) = script.worker(prompt)
             if status != 200 { return (status, #"{"error":{"message":"\#(text)"}}"#) }
-            return chatOK(text)
+            return ok(text)
         }
-        return chatOK("快捷按钮的回答")
+        return ok("快捷按钮的回答")
+    }
+
+    private func ok(_ text: String) -> (Int, String) {
+        switch script.wire {
+        case .chatCompletions: return chatOK(text)
+        case .anthropicMessages: return anthropicOK(text)
+        }
     }
 }
 
@@ -489,6 +689,49 @@ final class ChatSplitOrchestratorTests: XCTestCase {
         XCTAssertTrue(result.markdown.contains("没有返回正文"))
         XCTAssertTrue(result.markdown.contains("做好了"))
         XCTAssertFalse(result.markdown.contains(SplitTaskSummary.failedMark))
+    }
+
+    func testAnthropicSplitPostsMessagesWithImageBlocks() async throws {
+        let api = ChatSplitHTTP(.init(
+            planner: planJSON(["调研", "起草"]),
+            worker: { prompt in
+                if prompt.contains("你的子任务：起草") { return (500, "写挂了") }
+                return (200, "发现 A")
+            },
+            summaryText: "调研可用，起草没有完成。",
+            wire: .anthropicMessages
+        ))
+        let image = PromptImage(data: Data([1, 2, 3]), mimeType: "image/jpeg")
+        let result = try await ChatSplitTaskOrchestrator(
+            configuration: config(.anthropic, key: "sk-ant-split", model: "claude-sonnet-5-5", base: "https://api.anthropic.com/"),
+            transport: api
+        ).collaborate(
+            SplitTaskRequest(task: "写报告", resources: [], images: [image]),
+            callbacks: .ignore
+        )
+
+        XCTAssertEqual(result.headline, "1/2 完成，1 个失败")
+        XCTAssertTrue(result.markdown.contains("发现 A"))
+        XCTAssertTrue(result.markdown.contains("写挂了"))
+        let posts = api.snapshot().requests
+        XCTAssertEqual(posts.count, 4)
+        XCTAssertTrue(posts.allSatisfy { $0.url?.absoluteString == "https://api.anthropic.com/v1/messages" })
+        XCTAssertTrue(posts.allSatisfy { $0.value(forHTTPHeaderField: "x-api-key") == "sk-ant-split" })
+        XCTAssertTrue(posts.allSatisfy { $0.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01" })
+        XCTAssertTrue(posts.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+        let workers = posts.filter { promptText(jsonObject($0)).contains("你的子任务") }
+        XCTAssertEqual(workers.count, 2)
+        for worker in workers {
+            let blocks = anthropicContent(jsonObject(worker))
+            let source = blocks.first?["source"] as? [String: Any]
+            XCTAssertEqual(blocks.first?["type"] as? String, "image")
+            XCTAssertEqual(source?["media_type"] as? String, "image/jpeg")
+            XCTAssertEqual(source?["data"] as? String, image.data.base64EncodedString())
+        }
+        let summary = try XCTUnwrap(posts.first { promptText(jsonObject($0)).contains("你是汇总 agent") })
+        let summaryBlocks = anthropicContent(jsonObject(summary))
+        XCTAssertEqual(summaryBlocks.count, 1)
+        XCTAssertEqual(summaryBlocks.first?["type"] as? String, "text")
     }
 
     func testPlannerImageRefusalDoesNotStartWorkers() async {
@@ -600,6 +843,25 @@ final class RoutedProviderEngineTests: XCTestCase {
             imageURLs(jsonObject(shortcutCall)).first,
             "data:image/png;base64,\(png.data.base64EncodedString())"
         )
+    }
+
+    func testSelectingAnthropicUsesMessagesForAskAndShortcuts() async throws {
+        let transport = ScriptedHTTP { _ in anthropicOK("看完了") }
+        let resolution = ModelProviderResolution(
+            kind: .anthropic,
+            isExplicit: true,
+            configuration: config(.anthropic, key: "sk-ant-route", model: "claude-sonnet-5-5", base: "https://api.anthropic.com")
+        )
+        let client = RoutedGrokClient(resolve: { resolution }, transport: transport, pollInterval: .milliseconds(1))
+        let png = PromptImage(data: Data([0x89, 0x50]), mimeType: "image/png")
+        let result = try await client.execute(sampleRequest(images: [png])) { _ in }
+        XCTAssertEqual(result.detail, "看完了")
+        let request = try XCTUnwrap(transport.snapshot().first)
+        XCTAssertEqual(request.url?.path, "/v1/messages")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "sk-ant-route")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertFalse(transport.snapshot().contains { $0.url?.path.contains("chat/completions") == true })
+        XCTAssertFalse(transport.snapshot().contains { $0.url?.path.contains("/v1/agents") == true })
     }
 
     func testCursorProviderStillCreatesACloudAgent() async throws {
