@@ -342,8 +342,12 @@ that no Cursor key is set.
 - Accessibility and Input Monitoring are **not** requested.
 - **Files and Folders** access (Desktop, Documents, Downloads) may be requested
   the first time you move a file from one of those folders into the staging
-  tray, because moving removes it from there. If you decline, the tray copies
-  the file instead and leaves the original in place.
+  tray. A drop also hands over access to the dropped files themselves, and the
+  tray holds on to it until they are moved or copied in. If only the move is
+  refused, the tray copies the file and leaves the original in place. If macOS
+  refuses even reading it, the tray says so and names the setting
+  (**系统设置 → 隐私与安全性 → 文件与文件夹**, System Settings → Privacy &
+  Security → Files and Folders) instead of a bare 没有权限 ("no permission").
 - The app is not sandboxed and uses the outgoing network client entitlement.
 - Content you send (screenshots, URLs, inlined files, your prompt) goes to the
   provider you selected. With Cursor selected, it also appears as a Cloud Agent
@@ -514,6 +518,12 @@ Issues and pull requests are welcome.
 - If you add a Swift file to the app, add it to `GrokIsland.xcodeproj` and to
   `scripts/bootstrap-xcodeproj.sh`. If it depends on AppKit or SwiftUI, also add
   it to the `exclude` list in `Package.swift`.
+- Tray drop targets read the file URLs from the drag pasteboard inside the drop
+  callback and pass them straight to `TrayDrop.accept`, which starts their
+  security-scoped access and calls `FileTray.take` before the callback returns.
+  Don't cache them from hovering, load them later from an `NSItemProvider`, or
+  start the transfer in a `Task`: those URLs can lack the drop's access, and
+  Desktop files then fail with "Operation not permitted".
 - Never commit API keys or other credentials.
 
 No license file has been added yet.
