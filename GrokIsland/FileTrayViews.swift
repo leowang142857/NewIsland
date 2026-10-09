@@ -387,8 +387,8 @@ struct FileTrayLayer: View {
             dropOperation: { urls, option in
                 TrayDrop.operation(for: urls, into: destination, tray: tray, option: option)
             },
-            drop: { urls, option, allowsMove in
-                TrayDrop.accept(urls, into: destination, tray: tray, option: option, allowsMove: allowsMove)
+            drop: { pasteboard, option, allowsMove in
+                TrayDrop.accept(pasteboard, into: destination, tray: tray, option: option, allowsMove: allowsMove)
             }
         )
     }
@@ -703,9 +703,11 @@ struct TrayDropSlot: View {
 /// or Downloads files then fail with "Operation not permitted" although the tray is writable.
 @MainActor
 enum TrayDrop {
+    /// File URLs, and file promises (the source writes the file once the drop says where).
     nonisolated static let types: [UTType] = [.fileURL]
+        + ["com.apple.pasteboard.promised-file-url", "com.apple.NSFilePromiseItemMetaData"].map { UTType($0) ?? UTType(importedAs: $0) }
 
-    static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+    nonisolated static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
         pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
 
@@ -726,17 +728,40 @@ enum TrayDrop {
         }
     }
 
-    /// `urls` exactly as read from the pasteboard. `TrayDropAccess` turns them into real paths,
-    /// starts their access, and its `urls` are the only list used from here on.
+    nonisolated static func promises(on pasteboard: NSPasteboard) -> [NSFilePromiseReceiver] {
+        pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil) as? [NSFilePromiseReceiver] ?? []
+    }
+
+    /// A drop read from its own pasteboard, inside the drop callback: `draggingPasteboard` for an
+    /// AppKit row, the drag pasteboard for a SwiftUI target (which also passes its providers).
+    /// `TrayDropAccess` turns the URLs into real paths and starts their access; its `urls` are the
+    /// only list used from here on. `TrayDropSource` keeps what the source app can hand over itself.
     @discardableResult
-    static func accept(_ urls: [URL], into folder: String, tray: FileTray, option: Bool, allowsMove: Bool = true) -> Bool {
+    static func accept(_ pasteboard: NSPasteboard, providers: [NSItemProvider] = [], into folder: String, tray: FileTray, option: Bool, allowsMove: Bool = true) -> Bool {
+        let drop = TrayDropAccess(fileURLs(on: pasteboard))
+        let source = TrayDropSource(urls: drop.urls, providers: providers, pasteboard: pasteboard, fileSystem: tray.fileSystem)
+        guard !drop.urls.isEmpty || source.promisesOnly else {
+            drop.end()
+            return false
+        }
+        return accept(drop, source: source, into: folder, tray: tray, option: option, allowsMove: allowsMove)
+    }
+
+    /// URLs that arrived after the drop, loaded from item providers.
+    @discardableResult
+    static func accept(_ urls: [URL], providers: [NSItemProvider], into folder: String, tray: FileTray, option: Bool) -> Bool {
         let drop = TrayDropAccess(urls)
+        let source = TrayDropSource(urls: drop.urls, providers: providers, pasteboard: nil, fileSystem: tray.fileSystem)
+        return accept(drop, source: source, into: folder, tray: tray, option: option, allowsMove: true)
+    }
+
+    private static func accept(_ drop: TrayDropAccess, source: TrayDropSource, into folder: String, tray: FileTray, option: Bool, allowsMove: Bool) -> Bool {
         let intent = tray.dropIntent(for: drop.urls, into: folder, option: option, sourceAllowsMove: allowsMove)
         guard let mode = intent.mode else {
             drop.end()
             return false
         }
-        tray.take(drop, into: folder, mode: mode)
+        tray.take(drop, into: folder, mode: mode, source: source.source)
         return true
     }
 
@@ -745,22 +770,259 @@ enum TrayDrop {
     @discardableResult
     static func accept(_ providers: [NSItemProvider], into folder: String, tray: FileTray) -> Bool {
         let option = NSEvent.modifierFlags.contains(.option)
-        let urls = fileURLs(on: NSPasteboard(name: .drag))
-        if isThisDrop(urls, providers: providers, tray: tray) {
-            return accept(urls, into: folder, tray: tray, option: option)
+        let pasteboard = NSPasteboard(name: .drag)
+        if isThisDrop(on: pasteboard, providers: providers, tray: tray) {
+            return accept(pasteboard, providers: providers, into: folder, tray: tray, option: option)
         }
         Task { @MainActor in
             let urls = await ResourceIntake.loadFileURLs(from: providers)
-            accept(urls, into: folder, tray: tray, option: option)
+            accept(urls, providers: providers, into: folder, tray: tray, option: option)
         }
         return true
     }
 
     /// The shared drag pasteboard should hold the drop SwiftUI is reporting, not one left from an
-    /// earlier drag: as many files as providers, and tray items only while dragging out of the tray.
-    private static func isThisDrop(_ urls: [URL], providers: [NSItemProvider], tray: FileTray) -> Bool {
-        guard !urls.isEmpty, urls.count == providers.count else { return false }
+    /// earlier drag: one file (or file promise) per provider, and tray items only while dragging
+    /// out of the tray.
+    private static func isThisDrop(on pasteboard: NSPasteboard, providers: [NSItemProvider], tray: FileTray) -> Bool {
+        let urls = fileURLs(on: pasteboard)
+        if urls.isEmpty {
+            return !providers.isEmpty && promises(on: pasteboard).count == providers.count
+        }
+        guard urls.count == providers.count else { return false }
         return tray.isDraggingOut || !urls.contains { tray.fileSystem.relativePath(of: $0) != nil }
+    }
+}
+
+/// What the app a drop came from can hand over itself, for files the tray can't read through their
+/// URLs. WeChat, for one, drags files out of its own sandbox container, which other apps may not
+/// open. What only works during the drop (pasteboard bytes, starting file promises) happens in
+/// `init`; `fetch` runs afterwards, off the main thread, and copies into the tray.
+final class TrayDropSource: @unchecked Sendable {
+    /// The drop is file promises only, with no URL.
+    let promisesOnly: Bool
+    private let fileSystem: TrayFileSystem
+    private let staging: URL
+    /// By the dropped URL each stands for.
+    private let providers: [URL: NSItemProvider]
+    private let captured: [URL: URL]
+    /// Held until the source has written the promised files.
+    private let receivers: [NSFilePromiseReceiver]
+    private let promised: Task<[URL], Never>?
+
+    private static let promiseQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+
+    init(urls: [URL], providers: [NSItemProvider], pasteboard: NSPasteboard?, fileSystem: TrayFileSystem) {
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GrokIslandTrayDrop-\(UUID().uuidString)", isDirectory: true)
+        let appData = urls.filter(TrayInbound.isOtherAppData)
+        var captured: [URL: URL] = [:]
+        var receivers: [NSFilePromiseReceiver] = []
+        var promised: Task<[URL], Never>?
+        if let pasteboard {
+            let items = (pasteboard.pasteboardItems ?? []).filter { $0.types.contains(.fileURL) }
+            if !appData.isEmpty, items.count == urls.count {
+                for (url, item) in zip(urls, items) where appData.contains(url) {
+                    captured[url] = TrayDropSource.capture(item, for: url, in: staging)
+                }
+            }
+            let offered = TrayDrop.promises(on: pasteboard)
+            if !offered.isEmpty, urls.isEmpty || !appData.isEmpty {
+                receivers = offered
+                promised = TrayDropSource.receive(offered, into: staging)
+            }
+        }
+        self.fileSystem = fileSystem
+        self.staging = staging
+        self.providers = providers.count == urls.count && !urls.isEmpty
+            ? Dictionary(zip(urls, providers), uniquingKeysWith: { first, _ in first })
+            : [:]
+        self.captured = captured
+        self.receivers = receivers
+        self.promised = promised
+        promisesOnly = urls.isEmpty && promised != nil
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: staging)
+    }
+
+    var source: TraySource {
+        TraySource(promisesFilesOnly: promisesOnly) { urls, folder in
+            await self.fetch(urls, into: folder)
+        }
+    }
+
+    /// Asks in order: a promised file of the same name, the bytes taken off the pasteboard, then the
+    /// item provider (the file in place, then a copy). `urls` empty means all promised files.
+    func fetch(_ urls: [URL], into folder: String) async -> TraySourceResult {
+        var result = TraySourceResult()
+        var unclaimed = await promised?.value ?? []
+        if urls.isEmpty {
+            for file in unclaimed {
+                result.report.merge(fileSystem.adopt(file, as: file.lastPathComponent, into: folder))
+            }
+            return result
+        }
+        for url in urls {
+            let name = url.standardizedFileURL.lastPathComponent
+            var handed: TrayTransferReport?
+            if let index = unclaimed.firstIndex(where: { $0.lastPathComponent == name }) {
+                handed = Self.arrived(fileSystem.adopt(unclaimed.remove(at: index), as: name, into: folder))
+            }
+            if handed == nil, let file = captured[url] {
+                handed = Self.arrived(fileSystem.adopt(file, as: name, into: folder))
+            }
+            if handed == nil, let provider = providers[url] {
+                handed = await load(provider, for: url, as: name, into: folder)
+            }
+            if let handed {
+                result.report.merge(handed)
+                result.covered.insert(url)
+            }
+        }
+        return result
+    }
+
+    private func load(_ provider: NSItemProvider, for url: URL, as name: String, into folder: String) async -> TrayTransferReport? {
+        let wanted = UTType(filenameExtension: url.pathExtension)
+        var types = provider.registeredTypeIdentifiers.filter { Self.isFileItself($0, wanted: wanted) }
+        if types.isEmpty, let wanted, !wanted.conforms(to: .plainText) {
+            types = [wanted.identifier]
+        }
+        for type in types {
+            for inPlace in [true, false] {
+                if let report = await load(provider, type: type, inPlace: inPlace, as: name, into: folder) {
+                    return report
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The provided file only exists inside the completion handler, so it is copied in right there.
+    private func load(_ provider: NSItemProvider, type: String, inPlace: Bool, as name: String, into folder: String) async -> TrayTransferReport? {
+        let fileSystem = fileSystem
+        return await withCheckedContinuation { (continuation: CheckedContinuation<TrayTransferReport?, Never>) in
+            if inPlace {
+                _ = provider.loadInPlaceFileRepresentation(forTypeIdentifier: type) { file, isInPlace, _ in
+                    guard let file else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    let scoped = isInPlace && file.startAccessingSecurityScopedResource()
+                    defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+                    continuation.resume(returning: Self.arrived(fileSystem.adopt(file, as: name, into: folder)))
+                }
+            } else {
+                _ = provider.loadFileRepresentation(forTypeIdentifier: type) { file, _ in
+                    guard let file else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    continuation.resume(returning: Self.arrived(fileSystem.adopt(file, as: name, into: folder)))
+                }
+            }
+        }
+    }
+
+    private static func arrived(_ report: TrayTransferReport) -> TrayTransferReport? {
+        report.arrived.isEmpty ? nil : report
+    }
+
+    /// A representation of the file itself: not its URL, and not the text pasteboards add for a
+    /// name or path.
+    private static func isFileItself(_ identifier: String, wanted: UTType?) -> Bool {
+        guard let type = UTType(identifier), !type.conforms(to: .url), !type.conforms(to: .plainText) else { return false }
+        if let wanted { return type.conforms(to: wanted) }
+        return type.conforms(to: .data) || type.conforms(to: .directory)
+    }
+
+    /// The source app's own bytes for `url`, if it put them on the pasteboard, saved under the
+    /// dropped name. Pasteboard data can only be counted on while the drop is happening.
+    private static func capture(_ item: NSPasteboardItem, for url: URL, in staging: URL) -> URL? {
+        guard let wanted = UTType(filenameExtension: url.pathExtension),
+              let type = item.types.first(where: { isFileItself($0.rawValue, wanted: wanted) }),
+              let data = item.data(forType: type)
+        else { return nil }
+        let file = staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent(url.standardizedFileURL.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: file)
+            return file
+        } catch {
+            return nil
+        }
+    }
+
+    /// Starts the promises now, during the drop; the source writes the files when it gets to it.
+    private static func receive(_ receivers: [NSFilePromiseReceiver], into staging: URL) -> Task<[URL], Never> {
+        let folder = staging.appendingPathComponent("promised", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let collector = TrayPromiseCollector(expected: receivers.reduce(0) { $0 + max($1.fileTypes.count, 1) })
+        for receiver in receivers {
+            receiver.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: promiseQueue) { file, error in
+                collector.add(error == nil ? file : nil)
+            }
+        }
+        return Task.detached { await collector.wait(seconds: 120) }
+    }
+}
+
+/// Promised files as the source writes them. Gives up after a while: a source that never delivers
+/// would otherwise keep the tray busy.
+private final class TrayPromiseCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var expected: Int
+    private var files: [URL] = []
+    private var done = false
+    private var continuation: CheckedContinuation<[URL], Never>?
+
+    init(expected: Int) {
+        self.expected = expected
+    }
+
+    func add(_ file: URL?) {
+        lock.lock()
+        if let file { files.append(file) }
+        expected -= 1
+        let complete = expected <= 0
+        lock.unlock()
+        if complete { finish() }
+    }
+
+    func wait(seconds: Double) async -> [URL] {
+        await withCheckedContinuation { (continuation: CheckedContinuation<[URL], Never>) in
+            lock.lock()
+            if done {
+                let result = files
+                lock.unlock()
+                continuation.resume(returning: result)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { self.finish() }
+        }
+    }
+
+    private func finish() {
+        lock.lock()
+        guard !done else {
+            lock.unlock()
+            return
+        }
+        done = true
+        let waiting = continuation
+        continuation = nil
+        let result = files
+        lock.unlock()
+        waiting?.resume(returning: result)
     }
 }
 
@@ -828,8 +1090,8 @@ struct TrayRowHandlers {
     var menu: () -> NSMenu? = { nil }
     var dropTargetChanged: (Bool) -> Void = { _ in }
     var dropOperation: (_ urls: [URL], _ option: Bool) -> NSDragOperation = { _, _ in [] }
-    /// `allowsMove` is false when the app the files come from only lets them be copied.
-    var drop: (_ urls: [URL], _ option: Bool, _ allowsMove: Bool) -> Bool = { _, _, _ in false }
+    /// The drop's own pasteboard. `allowsMove` is false when the source app only lets files be copied.
+    var drop: (_ pasteboard: NSPasteboard, _ option: Bool, _ allowsMove: Bool) -> Bool = { _, _, _ in false }
 }
 
 private struct TrayRowSurface: NSViewRepresentable {
@@ -839,7 +1101,7 @@ private struct TrayRowSurface: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TrayRowSurfaceView {
         let view = TrayRowSurfaceView()
-        view.registerForDraggedTypes([.fileURL])
+        view.registerForDraggedTypes([.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
         view.handlers = handlers
         view.onHover = onHover
         view.toolTip = toolTip
@@ -864,7 +1126,7 @@ final class TrayRowSurfaceView: NSView, NSDraggingSource {
     private var dragging = false
     private var hoverArea: NSTrackingArea?
     private weak var dragWindow: NSWindow?
-    private var pasteboardURLs: (sequence: Int, urls: [URL])?
+    private var pasteboardURLs: (sequence: Int, urls: [URL], promised: Bool)?
 
     override var mouseDownCanMoveWindow: Bool { false }
 
@@ -990,16 +1252,19 @@ final class TrayRowSurfaceView: NSView, NSDraggingSource {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         handlers.dropTargetChanged(false)
         pasteboardURLs = nil
-        // Read again rather than reuse the hover cache: these URL objects carry the drop's access.
-        let urls = TrayDrop.fileURLs(on: sender.draggingPasteboard)
-        guard !urls.isEmpty else { return false }
+        // TrayDrop reads the URLs again rather than reuse the hover cache: those carry the drop's access.
         let allowsMove = sender.draggingSourceOperationMask.contains(.move)
-        return handlers.drop(urls, NSEvent.modifierFlags.contains(.option), allowsMove)
+        return handlers.drop(sender.draggingPasteboard, NSEvent.modifierFlags.contains(.option), allowsMove)
     }
 
     private func evaluate(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let urls = fileURLs(in: sender)
-        let wanted = urls.isEmpty ? [] : handlers.dropOperation(urls, NSEvent.modifierFlags.contains(.option))
+        let (urls, promised) = fileURLs(in: sender)
+        let wanted: NSDragOperation
+        if !urls.isEmpty {
+            wanted = handlers.dropOperation(urls, NSEvent.modifierFlags.contains(.option))
+        } else {
+            wanted = promised ? .copy : []
+        }
         let allowed = sender.draggingSourceOperationMask
         var operation: NSDragOperation = []
         if !wanted.isEmpty {
@@ -1016,13 +1281,15 @@ final class TrayRowSurfaceView: NSView, NSDraggingSource {
     }
 
     /// Read once per drag; `draggingUpdated` fires on every mouse move.
-    private func fileURLs(in sender: NSDraggingInfo) -> [URL] {
+    private func fileURLs(in sender: NSDraggingInfo) -> (urls: [URL], promised: Bool) {
         if let pasteboardURLs, pasteboardURLs.sequence == sender.draggingSequenceNumber {
-            return pasteboardURLs.urls
+            return (pasteboardURLs.urls, pasteboardURLs.promised)
         }
-        let urls = TrayInbound.fileURLs(TrayDrop.fileURLs(on: sender.draggingPasteboard))
-        pasteboardURLs = (sender.draggingSequenceNumber, urls)
-        return urls
+        let pasteboard = sender.draggingPasteboard
+        let urls = TrayInbound.fileURLs(TrayDrop.fileURLs(on: pasteboard))
+        let promised = urls.isEmpty && !TrayDrop.promises(on: pasteboard).isEmpty
+        pasteboardURLs = (sender.draggingSequenceNumber, urls, promised)
+        return (urls, promised)
     }
 }
 
