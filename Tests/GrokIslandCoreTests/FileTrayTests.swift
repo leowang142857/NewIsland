@@ -37,6 +37,19 @@ private struct TraySandbox {
         return url
     }
 
+    /// Where WeChat keeps a file it is dragging out: inside its own container.
+    var weChatDrag: URL {
+        base.appendingPathComponent("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/temp/drag", isDirectory: true)
+    }
+
+    @discardableResult
+    func weChatFile(_ name: String, _ text: String = "wechat") throws -> URL {
+        try FileManager.default.createDirectory(at: weChatDrag, withIntermediateDirectories: true)
+        let url = weChatDrag.appendingPathComponent(name)
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
     @discardableResult
     func trayFile(_ path: String, _ text: String = "tray") throws -> URL {
         let url = root.appendingPathComponent(path)
@@ -69,6 +82,69 @@ private struct TraySandbox {
         defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
         guard !fm.isWritableFile(atPath: folder.path) else { throw XCTSkip("permissions do not apply to this user") }
         return try await body()
+    }
+}
+
+/// A file error shaped like macOS's: a CocoaError over the POSIX error the kernel gave.
+private func cocoa(_ code: CocoaError.Code, posix: POSIXErrorCode?) -> CocoaError {
+    guard let posix else { return CocoaError(code) }
+    let underlying = NSError(domain: NSPOSIXErrorDomain, code: Int(posix.rawValue))
+    return CocoaError(code, userInfo: [NSUnderlyingErrorKey: underlying])
+}
+
+/// Stands in for the app a drop came from: hands over its own copy of the files it knows, and
+/// records what it was asked for.
+private final class SourceApp: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _asked: [[URL]] = []
+    private let fileSystem: TrayFileSystem
+    private let staging: URL
+    /// Its own copies, by the dropped URL they stand for.
+    private let copies: [URL: String]
+    private let promised: [String: String]
+    /// Runs as the source is asked, e.g. to check the drop's access is still held.
+    var onAsk: () -> Void = {}
+
+    init(_ box: TraySandbox, copies: [URL: String] = [:], promised: [String: String] = [:]) throws {
+        fileSystem = box.fileSystem
+        staging = box.base.appendingPathComponent("handed-over-\(UUID().uuidString)", isDirectory: true)
+        self.copies = copies
+        self.promised = promised
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    }
+
+    var asked: [[URL]] { lock.lock(); defer { lock.unlock() }; return _asked }
+
+    var source: TraySource {
+        TraySource(promisesFilesOnly: !promised.isEmpty) { urls, folder in self.fetch(urls, into: folder) }
+    }
+
+    private func fetch(_ urls: [URL], into folder: String) -> TraySourceResult {
+        lock.lock()
+        _asked.append(urls)
+        lock.unlock()
+        onAsk()
+        var result = TraySourceResult()
+        if urls.isEmpty {
+            for (name, text) in promised.sorted(by: { $0.key < $1.key }) {
+                result.report.merge(fileSystem.adopt(handOver(text), as: name, into: folder))
+            }
+        }
+        for url in urls {
+            guard let text = copies[url] else { continue }
+            let file = handOver(text)
+            result.report.merge(fileSystem.adopt(file, as: url.lastPathComponent, into: folder))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "adopting copies; the source cleans up its own file")
+            result.covered.insert(url)
+        }
+        return result
+    }
+
+    /// A temp file under a name of the source's choosing, as an item provider hands one over.
+    private func handOver(_ text: String) -> URL {
+        let file = staging.appendingPathComponent("tmp-\(UUID().uuidString).bin")
+        try? Data(text.utf8).write(to: file)
+        return file
     }
 }
 
@@ -300,6 +376,58 @@ final class TrayFileSystemTests: XCTestCase {
         XCTAssertTrue(box.exists(secret))
     }
 
+    func testAFileInAnotherAppsContainerIsCopiedNeverMoved() throws {
+        let box = try TraySandbox()
+        let file = try box.weChatFile("G11.pdf", "pdf")
+
+        let (moved, copies) = box.fileSystem.moveIn([file], into: "", mode: .move)
+        XCTAssertTrue(moved.arrived.isEmpty)
+        XCTAssertEqual(copies, [TrayPendingCopy(source: file, wantedMove: false)], "WeChat's working copy is not the tray's to take")
+
+        let report = box.fileSystem.copyIn(copies, into: "")
+        XCTAssertEqual(report.copied, ["G11.pdf"])
+        XCTAssertEqual(report.summary(destination: TrayPath.rootTitle), "已拷贝 1 项到「暂存」", "no 原件留着 note: nothing was going to move")
+        XCTAssertTrue(box.exists(file))
+        XCTAssertEqual(box.text("G11.pdf"), "pdf")
+    }
+
+    func testARefusedCopyIsLeftForTheSourceAppAndInsideItsContainerBlamesIt() async throws {
+        let box = try TraySandbox()
+        let weChat = try box.weChatFile("G11.pdf")
+        let locked = try box.desktopFolder("私密", files: ["secret.txt": "x"])
+        let secret = locked.appendingPathComponent("secret.txt")
+        let gone = box.desktop.appendingPathComponent("gone.txt")
+        let copies = [weChat, secret, gone].map { TrayPendingCopy(source: $0, wantedMove: false) }
+
+        let report = try await box.withPermissions(0o000, on: box.weChatDrag) {
+            try await box.withPermissions(0o000, on: locked) {
+                box.fileSystem.copyIn(copies, into: "")
+            }
+        }
+
+        XCTAssertTrue(report.arrived.isEmpty)
+        XCTAssertEqual(report.failures.map(\.source), [weChat, secret, gone])
+        XCTAssertEqual(report.failures.map(\.isRefusal), [true, true, false], "a missing file is nobody's refusal")
+        XCTAssertEqual(report.failures[0].reason, TrayError.sourceAppRefused)
+        XCTAssertNotEqual(report.failures[1].reason, TrayError.sourceAppRefused, "outside a container it is the system's refusal")
+        XCTAssertTrue(try box.names().isEmpty, "a failed copy leaves nothing half-made behind")
+    }
+
+    func testAHandedOverFileTakesTheDroppedNameAndStaysTheSourcesToRemove() throws {
+        let box = try TraySandbox()
+        try box.trayFile("G11.pdf", "older")
+        let temp = box.base.appendingPathComponent("NSIRD_WeChat/tmp-123.bin")
+        try FileManager.default.createDirectory(at: temp.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("handed over".utf8).write(to: temp)
+
+        let report = box.fileSystem.adopt(temp, as: "G11.pdf", into: "")
+
+        XCTAssertEqual(report.copied, ["G11 2.pdf"], "named as dropped, numbered on a clash")
+        XCTAssertEqual(box.text("G11 2.pdf"), "handed over")
+        XCTAssertEqual(box.text("G11.pdf"), "older")
+        XCTAssertTrue(box.exists(temp), "copied, not moved: an item provider deletes its own file")
+    }
+
     func testMoveInRenamesAndLeavesCopiesForCopyIn() throws {
         let box = try TraySandbox()
         let moved = try box.desktopFile("moved.txt")
@@ -516,11 +644,6 @@ final class TrayReportTests: XCTestCase {
     }
 
     func testPermissionErrorsSayWhoRefused() {
-        func cocoa(_ code: CocoaError.Code, posix: POSIXErrorCode?) -> CocoaError {
-            guard let posix else { return CocoaError(code) }
-            let underlying = NSError(domain: NSPOSIXErrorDomain, code: Int(posix.rawValue))
-            return CocoaError(code, userInfo: [NSUnderlyingErrorKey: underlying])
-        }
         // What macOS throws for Desktop or Downloads without the drop's access: 513 over EPERM.
         XCTAssertEqual(TrayError.describe(cocoa(.fileWriteNoPermission, posix: .EPERM)), TrayError.privacyBlocked)
         XCTAssertEqual(TrayError.describe(cocoa(.fileReadNoPermission, posix: .EPERM)), TrayError.privacyBlocked)
@@ -535,6 +658,39 @@ final class TrayReportTests: XCTestCase {
         XCTAssertTrue(TrayError.isNoSuchFile(cocoa(.fileReadNoSuchFile, posix: nil)))
         XCTAssertTrue(TrayError.isNoSuchFile(POSIXError(.ENOENT)))
         XCTAssertFalse(TrayError.isNoSuchFile(cocoa(.fileReadNoPermission, posix: .EACCES)))
+    }
+
+    func testOtherAppsContainersAreRecognized() {
+        func appData(_ path: String) -> Bool { TrayInbound.isOtherAppData(URL(fileURLWithPath: path)) }
+        XCTAssertTrue(appData("/Users/l/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/temp/drag/G11.pdf"))
+        XCTAssertTrue(appData("/Users/l/Library/Group Containers/5A4RE8SF68.com.tencent.xinWeChat/a.pdf"))
+        XCTAssertTrue(appData("/Users/l/Desktop/../Library/Containers/x/a.pdf"), "judged on the real path")
+        XCTAssertFalse(appData("/Users/l/Desktop/G11.pdf"))
+        XCTAssertFalse(appData("/Users/l/Downloads/Containers/a.pdf"))
+        XCTAssertFalse(appData("/Users/l/Library/ContainersOld/a.pdf"))
+        XCTAssertFalse(appData("/Users/l/Library/Application Support/GrokIsland/tray/a.pdf"))
+    }
+
+    func testARefusalInsideAnotherAppsContainerBlamesThatAppNotPrivacySettings() {
+        // Leo's Console: open on …/Library/Containers/com.tencent.xinWeChat/…/temp/drag/G11_SM1_Weekly_Presentations.pdf: Operation not permitted
+        let weChat = URL(fileURLWithPath: "/Users/l/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/temp/drag/G11.pdf")
+        let desktop = URL(fileURLWithPath: "/Users/l/Desktop/G11.pdf")
+        XCTAssertEqual(TrayError.describe(cocoa(.fileReadNoPermission, posix: .EPERM), source: weChat), TrayError.sourceAppRefused)
+        XCTAssertEqual(TrayError.describe(cocoa(.fileReadNoPermission, posix: .EACCES), source: weChat), TrayError.sourceAppRefused)
+        XCTAssertEqual(TrayError.describe(POSIXError(.EPERM), source: weChat), TrayError.sourceAppRefused)
+        XCTAssertEqual(
+            TrayError.describe(cocoa(.fileReadNoPermission, posix: .EPERM), source: desktop), TrayError.privacyBlocked,
+            "Desktop and Downloads are still about Files and Folders"
+        )
+        XCTAssertEqual(TrayError.describe(cocoa(.fileWriteOutOfSpace, posix: nil), source: weChat), "磁盘空间不够", "only a refusal is the app's doing")
+        XCTAssertEqual(TrayError.sourceAppRefused, "来源 App 没交出可读文件（微信等）。请先存到桌面/文件夹，再拖进暂存")
+
+        XCTAssertTrue(TrayError.isPermission(cocoa(.fileReadNoPermission, posix: .EPERM)))
+        XCTAssertTrue(TrayError.isPermission(cocoa(.fileWriteNoPermission, posix: nil)))
+        XCTAssertTrue(TrayError.isPermission(POSIXError(.EACCES)))
+        XCTAssertFalse(TrayError.isPermission(cocoa(.fileReadNoSuchFile, posix: .ENOENT)))
+        XCTAssertFalse(TrayError.isPermission(cocoa(.fileWriteOutOfSpace, posix: nil)))
+        XCTAssertFalse(TrayError.isPermission(POSIXError(.ENOENT)))
     }
 
     func testDroppedFileURLsComeInEveryPasteboardShape() {
@@ -638,7 +794,7 @@ final class FileTrayModelTests: XCTestCase {
     func testEmptyDropSaysNothingWasTaken() async throws {
         let tray = makeTray(try TraySandbox())
         let log = AccessLog()
-        await tray.take(log.access([URL(string: "https://x.ai")!])).value
+        _ = await tray.take(log.access([URL(string: "https://x.ai")!])).value
         XCTAssertEqual(tray.notice?.isProblem, true)
         XCTAssertEqual(log.started, [], "a link is neither started nor brought in")
     }
@@ -688,6 +844,125 @@ final class FileTrayModelTests: XCTestCase {
         XCTAssertTrue(box.exists(kept), "an original that cannot move stays where it was")
         XCTAssertEqual(Set(tray.entries.map(\.name)), ["moved.txt", "kept.txt"])
         XCTAssertEqual(tray.notice?.text, "已移进「暂存」1 项，另拷贝 1 项（1 项在别的磁盘或移不动，原件留着）")
+    }
+
+    func testAWeChatFileIsAskedOfWeChatFirstWhileTheDropAccessIsHeld() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let desk = try box.desktopFile("a.txt")
+        let weChat = try box.weChatFile("G11.pdf", "in WeChat's container")
+        let app = try SourceApp(box, copies: [weChat: "WeChat's own copy"])
+        let log = AccessLog()
+        app.onAsk = { XCTAssertEqual(log.stopped, [], "the drop's access is still held while the app is asked") }
+
+        let report = await tray.take(log.access([desk, weChat]), mode: .move, source: app.source).value
+
+        XCTAssertEqual(app.asked, [[weChat]], "only the container file, and only once")
+        XCTAssertEqual(report.moved, ["a.txt"], "the Finder-style file still moves directly")
+        XCTAssertEqual(report.copied, ["G11.pdf"])
+        XCTAssertEqual(report.failures, [])
+        XCTAssertEqual(box.text("G11.pdf"), "WeChat's own copy")
+        XCTAssertTrue(box.exists(weChat), "never moved out of WeChat")
+        XCTAssertEqual(Set(log.stopped), [desk, weChat])
+        XCTAssertEqual(tray.notice?.text, "已移进「暂存」1 项，另拷贝 1 项")
+        XCTAssertFalse(tray.isImporting)
+    }
+
+    func testADesktopDropNeverAsksTheSourceApp() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let desk = try box.desktopFile("a.txt")
+        let app = try SourceApp(box, copies: [desk: "should not be used"])
+
+        let report = await tray.take(AccessLog().access([desk]), mode: .move, source: app.source).value
+
+        XCTAssertEqual(app.asked, [])
+        XCTAssertEqual(report.moved, ["a.txt"])
+        XCTAssertEqual(box.text("a.txt"), "hello")
+    }
+
+    func testWhatTheSourceAppDoesNotHandOverIsCopiedDirectly() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let weChat = try box.weChatFile("G11.pdf", "readable after all")
+        let app = try SourceApp(box)
+
+        let report = await tray.take(AccessLog().access([weChat]), mode: .move, source: app.source).value
+
+        XCTAssertEqual(app.asked, [[weChat]])
+        XCTAssertEqual(report.copied, ["G11.pdf"])
+        XCTAssertEqual(box.text("G11.pdf"), "readable after all")
+        XCTAssertTrue(box.exists(weChat))
+    }
+
+    func testAWeChatFileNobodyHandsOverSaysToSaveItFirst() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let weChat = try box.weChatFile("G11_SM1_Weekly_Presentations.pdf")
+        let app = try SourceApp(box)
+
+        let (asked, direct) = try await box.withPermissions(0o000, on: box.weChatDrag) { () async -> (TrayTransferReport, TrayTransferReport) in
+            let asked = await tray.take(AccessLog().access([weChat]), mode: .move, source: app.source).value
+            let direct = await tray.receive([weChat])
+            return (asked, direct)
+        }
+
+        XCTAssertEqual(app.asked, [[weChat]], "asked once, not again after the direct copy failed too")
+        XCTAssertEqual(asked.failures.map(\.reason), [TrayError.sourceAppRefused])
+        XCTAssertEqual(direct.failures.map(\.reason), [TrayError.sourceAppRefused], "the same words with no app to ask")
+        XCTAssertEqual(tray.notice?.text, "「G11_SM1_Weekly_Presentations.pdf」没放进来：" + TrayError.sourceAppRefused)
+        XCTAssertEqual(tray.notice?.isProblem, true)
+        XCTAssertTrue(box.exists(weChat))
+    }
+
+    func testARefusedDirectCopyIsOfferedToTheSourceApp() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let locked = try box.desktopFolder("私密", files: ["a.txt": "on disk", "b.txt": "on disk"])
+        let a = locked.appendingPathComponent("a.txt")
+        let b = locked.appendingPathComponent("b.txt")
+        let app = try SourceApp(box, copies: [a: "from the app"])
+
+        let report = try await box.withPermissions(0o000, on: locked) {
+            await tray.take(AccessLog().access([a, b]), mode: .copy, source: app.source).value
+        }
+
+        XCTAssertEqual(app.asked, [[a, b]], "outside a container, asked only once the system said no")
+        XCTAssertEqual(report.copied, ["a.txt"])
+        XCTAssertEqual(box.text("a.txt"), "from the app")
+        XCTAssertEqual(report.failures.map(\.name), ["b.txt"], "what it handed over is no longer a failure")
+        XCTAssertNotEqual(report.failures.first?.reason, TrayError.sourceAppRefused)
+    }
+
+    func testPromisedFilesWithNoURLAreBroughtInByTheSourceApp() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let app = try SourceApp(box, promised: ["G11.pdf": "promised"])
+        let log = AccessLog()
+
+        let report = await tray.take(log.access([]), source: app.source).value
+
+        XCTAssertEqual(app.asked, [[]])
+        XCTAssertEqual(report.copied, ["G11.pdf"])
+        XCTAssertEqual(box.text("G11.pdf"), "promised")
+        XCTAssertEqual(tray.notice?.text, "已拷贝 1 项到「暂存」")
+        XCTAssertFalse(tray.isImporting)
+
+        let nothing = try SourceApp(box)
+        _ = await tray.take(log.access([]), source: nothing.source).value
+        XCTAssertEqual(nothing.asked, [], "no URL and no promise: nothing to ask for")
+        XCTAssertEqual(tray.notice?.text, "只收文件和文件夹，这次什么也没放进来")
+    }
+
+    func testAPromiseTheSourceAppDoesNotKeepSaysSo() async throws {
+        let tray = makeTray(try TraySandbox())
+        let source = TraySource(promisesFilesOnly: true) { _, _ in TraySourceResult() }
+
+        let report = await tray.take(AccessLog().access([]), source: source).value
+
+        XCTAssertEqual(report.failures.map(\.reason), [TrayError.sourceAppRefused])
+        XCTAssertEqual(tray.notice?.isProblem, true)
+        XCTAssertFalse(tray.isImporting)
     }
 
     func testOpenAndGoUpAndAVanishedFolderFallsBackToTheRoot() async throws {

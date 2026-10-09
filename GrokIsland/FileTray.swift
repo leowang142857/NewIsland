@@ -149,6 +149,26 @@ enum TrayError: LocalizedError, Equatable {
     }
 
     static let privacyBlocked = "macOS 没放行：系统设置 → 隐私与安全性 → 文件与文件夹，给 NewIsland 打开"
+    /// The file sits in another app's private container and that app gave no readable copy;
+    /// no privacy setting for Desktop or Downloads changes that.
+    static let sourceAppRefused = "来源 App 没交出可读文件（微信等）。请先存到桌面/文件夹，再拖进暂存"
+
+    /// Like `describe(_:)`, for an error about `source`: a refusal inside another app's
+    /// container is that app's doing, not the user's privacy settings.
+    static func describe(_ error: Error, source: URL) -> String {
+        if isPermission(error), TrayInbound.isOtherAppData(source) { return sourceAppRefused }
+        return describe(error)
+    }
+
+    /// The system said no (sandbox, privacy protection or file permissions), as opposed to
+    /// missing, full or broken.
+    static func isPermission(_ error: Error) -> Bool {
+        if let cocoa = error as? CocoaError {
+            return cocoa.code == .fileReadNoPermission || cocoa.code == .fileWriteNoPermission
+        }
+        if let posix = error as? POSIXError { return posix.code == .EPERM || posix.code == .EACCES }
+        return false
+    }
 
     /// File-system errors in words a person would use.
     static func describe(_ error: Error) -> String {
@@ -267,6 +287,14 @@ final class TrayDropAccess: @unchecked Sendable {
 
 /// File URLs handed over by a drop, in whatever shape the pasteboard used.
 enum TrayInbound {
+    /// Inside some app's private container (`~/Library/Containers/…`, `Group Containers`).
+    /// Sandboxed apps such as WeChat drag files out from there, and other apps may not open them;
+    /// the tray asks the source app for its own copy instead, and never moves such a file.
+    static func isOtherAppData(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        return path.contains("/Library/Containers/") || path.contains("/Library/Group Containers/")
+    }
+
     /// File URLs only, as real paths.
     static func fileURLs(_ urls: [URL]) -> [URL] {
         urls.filter(\.isFileURL).map(filePath)
@@ -361,6 +389,10 @@ enum TrayDropIntent: Equatable, Sendable {
 struct TrayFailure: Equatable, Sendable {
     var name: String
     var reason: String
+    /// The dropped URL, for files from outside.
+    var source: URL? = nil
+    /// The system refused (`TrayError.isPermission`), so the source app may still hand it over.
+    var isRefusal = false
 }
 
 /// A file from outside that has to be copied in: it is on another disk, the drop asked for a copy,
@@ -369,6 +401,24 @@ struct TrayPendingCopy: Equatable, Sendable {
     var source: URL
     /// A move was asked for, so the report says the original stayed.
     var wantedMove: Bool
+    /// The name to give it in the tray, when `source` is a stand-in such as a source app's temp copy.
+    var name: String? = nil
+}
+
+/// What the app a drop came from handed over itself, already copied into the tray.
+struct TraySourceResult: Sendable {
+    var report = TrayTransferReport()
+    /// Dropped URLs the source answered for; the rest are tried directly.
+    var covered: Set<URL> = []
+}
+
+/// The app a drop came from, asked for its own copy of files the tray can't read through their
+/// URLs: an item provider's file, a file promise, its bytes on the pasteboard. AppKit fills this
+/// in during the drop; `fetch` runs afterwards and copies into the tray folder it is given.
+struct TraySource: Sendable {
+    /// The drop promised files with no URL to go with them; `fetch([], …)` brings those in.
+    var promisesFilesOnly = false
+    var fetch: @Sendable (_ urls: [URL], _ folder: String) async -> TraySourceResult
 }
 
 /// Outcome of a drop or a move inside the tray.
@@ -572,8 +622,10 @@ struct TrayFileSystem: Sendable {
                 report.failures.append(TrayFailure(name: name, reason: TrayError.containsTray.localizedDescription))
                 continue
             }
-            guard mode == .move, Self.sameVolume(source, target) else {
-                copies.append(TrayPendingCopy(source: source, wantedMove: mode == .move))
+            // Never take a file out of another app's container: it is that app's working copy.
+            let appData = TrayInbound.isOtherAppData(source)
+            guard mode == .move, !appData, Self.sameVolume(source, target) else {
+                copies.append(TrayPendingCopy(source: source, wantedMove: mode == .move && !appData))
                 continue
             }
 
@@ -584,7 +636,7 @@ struct TrayFileSystem: Sendable {
             } catch {
                 Self.log("move \(source.path)", error)
                 if Self.itemExists(at: destination) {
-                    report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
+                    report.failures.append(Self.failure(name, source, error))
                 } else {
                     // A locked original, or one macOS won't let go of, may still be copied.
                     copies.append(TrayPendingCopy(source: source, wantedMove: true))
@@ -607,7 +659,7 @@ struct TrayFileSystem: Sendable {
         }
         let fm = FileManager.default
         for copy in copies {
-            let name = copy.source.standardizedFileURL.lastPathComponent
+            let name = copy.name ?? copy.source.standardizedFileURL.lastPathComponent
             let (destination, path) = landing(for: copy.source, named: name, in: target, folder: folder)
             do {
                 try fm.copyItem(at: copy.source, to: destination)
@@ -616,10 +668,26 @@ struct TrayFileSystem: Sendable {
             } catch {
                 Self.log("copy \(copy.source.path)", error)
                 try? fm.removeItem(at: destination)
-                report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
+                report.failures.append(Self.failure(name, copy.source, error))
             }
         }
         return report
+    }
+
+    /// A file the source app handed over in place of a dropped URL (an item provider's copy, a
+    /// promised file), copied into `folder` as `name`. Call it while `provided` still exists: an
+    /// item provider deletes its copy once the completion handler returns.
+    func adopt(_ provided: URL, as name: String, into folder: String) -> TrayTransferReport {
+        copyIn([TrayPendingCopy(source: provided, wantedMove: false, name: name)], into: folder)
+    }
+
+    private static func failure(_ name: String, _ source: URL, _ error: Error) -> TrayFailure {
+        TrayFailure(
+            name: name,
+            reason: TrayError.describe(error, source: source),
+            source: source,
+            isRefusal: TrayError.isPermission(error)
+        )
     }
 
     /// macOS's own error goes to the system log (Console: `GrokIsland FileTray`), so a refusal
@@ -1013,17 +1081,25 @@ final class FileTray: ObservableObject {
     /// are done before it returns, while the access that came with the drop is certainly valid.
     /// Copies continue off the main thread, and the access is held until the last one is done.
     /// The files are `drop.urls` and nothing else, so they are the values access was started on.
+    ///
+    /// With a `source`, files in another app's container are asked of that app first, and anything
+    /// the system refuses to copy is asked of it afterwards. What it can't hand over either keeps
+    /// the direct attempt's reason.
     @discardableResult
-    func take(_ drop: TrayDropAccess, into target: String? = nil, mode: TrayDropMode? = nil) -> Task<TrayTransferReport, Never> {
+    func take(_ drop: TrayDropAccess, into target: String? = nil, mode: TrayDropMode? = nil, source: TraySource? = nil) -> Task<TrayTransferReport, Never> {
         let destination = target ?? folder
-        guard !drop.urls.isEmpty else {
+        guard !drop.urls.isEmpty || source?.promisesFilesOnly == true else {
             drop.end()
             post("只收文件和文件夹，这次什么也没放进来", problem: true)
             return Task { TrayTransferReport() }
         }
         let chosen = mode ?? dropMode
-        let (renamed, copies) = fileSystem.moveIn(drop.urls, into: destination, mode: chosen)
-        guard !copies.isEmpty else {
+        let askFirst = source == nil ? [] : drop.urls.filter {
+            TrayInbound.isOtherAppData($0) && self.fileSystem.relativePath(of: $0.standardizedFileURL) == nil
+        }
+        let direct = drop.urls.filter { !askFirst.contains($0) }
+        let (renamed, copies) = fileSystem.moveIn(direct, into: destination, mode: chosen)
+        guard !copies.isEmpty || !askFirst.isEmpty || source?.promisesFilesOnly == true else {
             drop.end()
             finish(renamed, destination: destination, drop: drop)
             return Task { renamed }
@@ -1032,13 +1108,30 @@ final class FileTray: ObservableObject {
         let fileSystem = fileSystem
         importsInFlight += 1
         return Task {
-            let copied = await Task.detached(priority: .userInitiated) {
-                defer { drop.end() }
-                return fileSystem.copyIn(copies, into: destination)
-            }.value
-            importsInFlight -= 1
+            defer { drop.end() }
             var report = renamed
+            var pending = copies
+            if let source, !askFirst.isEmpty || source.promisesFilesOnly {
+                let handed = await source.fetch(askFirst, destination)
+                report.merge(handed.report)
+                if source.promisesFilesOnly, handed.report.arrived.isEmpty, handed.report.failures.isEmpty {
+                    report.failures.append(TrayFailure(name: "拖来的文件", reason: TrayError.sourceAppRefused))
+                }
+                pending += askFirst.filter { !handed.covered.contains($0) }.map {
+                    TrayPendingCopy(source: $0, wantedMove: false)
+                }
+            }
+            var copied = await Task.detached(priority: .userInitiated) {
+                fileSystem.copyIn(pending, into: destination)
+            }.value
+            let refused = copied.failures.compactMap { $0.isRefusal ? $0.source : nil }.filter { !askFirst.contains($0) }
+            if let source, !refused.isEmpty {
+                let handed = await source.fetch(refused, destination)
+                copied.failures.removeAll { $0.source.map(handed.covered.contains) ?? false }
+                copied.merge(handed.report)
+            }
             report.merge(copied)
+            importsInFlight -= 1
             finish(report, destination: destination, drop: drop)
             return report
         }
