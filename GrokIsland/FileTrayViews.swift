@@ -695,13 +695,18 @@ struct TrayDropSlot: View {
 }
 
 /// Shared drop rules for the tray's AppKit rows and SwiftUI targets.
+///
+/// Drop-session rule: read the file URLs from the drag pasteboard inside the drop callback
+/// (`performDragOperation`, SwiftUI's `performDrop`), start their access there, and hand them to
+/// `FileTray.take` before returning. URLs read earlier (while hovering) or rebuilt later from an
+/// `NSItemProvider` are not guaranteed to carry the access macOS grants for the drop, and Desktop
+/// or Downloads files then fail with "Operation not permitted" although the tray is writable.
 @MainActor
 enum TrayDrop {
     nonisolated static let types: [UTType] = [.fileURL]
 
-    /// Finder sometimes hands over file reference URLs (`/.file/id=…`); the tray needs real paths.
-    static func normalized(_ urls: [URL]) -> [URL] {
-        urls.filter(\.isFileURL).map { ($0 as NSURL).filePathURL ?? $0 }
+    static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
 
     /// Cursor for a SwiftUI target, which cannot read the dragged URLs until the drop.
@@ -721,20 +726,31 @@ enum TrayDrop {
         }
     }
 
+    /// `urls` exactly as read from the pasteboard: their access starts before anything else.
     @discardableResult
     static func accept(_ urls: [URL], into folder: String, tray: FileTray, option: Bool, allowsMove: Bool = true) -> Bool {
-        let intent = tray.dropIntent(for: urls, into: folder, option: option, sourceAllowsMove: allowsMove)
-        guard let mode = intent.mode else { return false }
-        Task { await tray.receive(urls, into: folder, mode: mode) }
+        let access = TrayDropAccess(urls)
+        let files = TrayInbound.fileURLs(urls)
+        let intent = tray.dropIntent(for: files, into: folder, option: option, sourceAllowsMove: allowsMove)
+        guard let mode = intent.mode else {
+            access.end()
+            return false
+        }
+        tray.take(files, into: folder, mode: mode, access: access)
         return true
     }
 
-    /// SwiftUI drops resolve their URLs later, so ⌥ is read now, while the drop is happening.
+    /// SwiftUI drop: read the drag pasteboard now, like an AppKit row does. The providers are a
+    /// fallback only; what they load arrives after the drop is over.
     @discardableResult
     static func accept(_ providers: [NSItemProvider], into folder: String, tray: FileTray) -> Bool {
         let option = NSEvent.modifierFlags.contains(.option)
+        let urls = fileURLs(on: NSPasteboard(name: .drag))
+        if !urls.isEmpty {
+            return accept(urls, into: folder, tray: tray, option: option)
+        }
         Task { @MainActor in
-            let urls = normalized(await ResourceIntake.loadFileURLs(from: providers))
+            let urls = await ResourceIntake.loadFileURLs(from: providers)
             accept(urls, into: folder, tray: tray, option: option)
         }
         return true
@@ -966,7 +982,9 @@ final class TrayRowSurfaceView: NSView, NSDraggingSource {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         handlers.dropTargetChanged(false)
-        let urls = fileURLs(in: sender)
+        pasteboardURLs = nil
+        // Read again rather than reuse the hover cache: these URL objects carry the drop's access.
+        let urls = TrayDrop.fileURLs(on: sender.draggingPasteboard)
         guard !urls.isEmpty else { return false }
         let allowsMove = sender.draggingSourceOperationMask.contains(.move)
         return handlers.drop(urls, NSEvent.modifierFlags.contains(.option), allowsMove)
@@ -995,11 +1013,7 @@ final class TrayRowSurfaceView: NSView, NSDraggingSource {
         if let pasteboardURLs, pasteboardURLs.sequence == sender.draggingSequenceNumber {
             return pasteboardURLs.urls
         }
-        let objects = sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL] ?? []
-        let urls = TrayDrop.normalized(objects)
+        let urls = TrayInbound.fileURLs(TrayDrop.fileURLs(on: sender.draggingPasteboard))
         pasteboardURLs = (sender.draggingSequenceNumber, urls)
         return urls
     }

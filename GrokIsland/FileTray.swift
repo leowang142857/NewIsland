@@ -148,12 +148,15 @@ enum TrayError: LocalizedError, Equatable {
         }
     }
 
+    static let privacyBlocked = "macOS 没放行：系统设置 → 隐私与安全性 → 文件与文件夹，给 NewIsland 打开"
+
     /// File-system errors in words a person would use.
     static func describe(_ error: Error) -> String {
         if let tray = error as? TrayError { return tray.localizedDescription }
         if let cocoa = error as? CocoaError {
             switch cocoa.code {
-            case .fileWriteNoPermission, .fileReadNoPermission: return "没有权限"
+            case .fileWriteNoPermission, .fileReadNoPermission:
+                return permissionReason(posix: posixCode(under: cocoa), reading: cocoa.code == .fileReadNoPermission)
             case .fileWriteOutOfSpace: return "磁盘空间不够"
             case .fileNoSuchFile, .fileReadNoSuchFile: return "找不到了"
             case .fileWriteFileExists: return "同名的已经存在"
@@ -161,7 +164,119 @@ enum TrayError: LocalizedError, Equatable {
             default: break
             }
         }
+        if let posix = error as? POSIXError, [.EPERM, .EACCES].contains(posix.code) {
+            return permissionReason(posix: posix.code, reading: false)
+        }
         return error.localizedDescription
+    }
+
+    /// Gone, as opposed to there but off limits.
+    static func isNoSuchFile(_ error: Error) -> Bool {
+        if let cocoa = error as? CocoaError {
+            return cocoa.code == .fileNoSuchFile || cocoa.code == .fileReadNoSuchFile
+        }
+        if let posix = error as? POSIXError { return posix.code == .ENOENT || posix.code == .ENOTDIR }
+        return false
+    }
+
+    /// macOS wraps the system's answer. EPERM ("Operation not permitted") is the sandbox or privacy
+    /// protection refusing, typically Desktop, Documents or Downloads touched without the access a
+    /// drop grants or the app's own consent. EACCES is the file's own permissions.
+    private static func permissionReason(posix: POSIXErrorCode?, reading: Bool) -> String {
+        switch posix {
+        case .EPERM?: privacyBlocked
+        case .EACCES?: reading ? "没有读取它的权限" : "没有写入那里的权限"
+        default: "没有权限"
+        }
+    }
+
+    private static func posixCode(under error: CocoaError) -> POSIXErrorCode? {
+        guard let underlying = error.underlying else { return nil }
+        if let posix = underlying as? POSIXError { return posix.code }
+        let ns = underlying as NSError
+        guard ns.domain == NSPOSIXErrorDomain, let code = Int32(exactly: ns.code) else { return nil }
+        return POSIXErrorCode(rawValue: code)
+    }
+}
+
+/// Access to the files a drop handed over, held until the tray is done with them.
+///
+/// URLs read from a drag pasteboard can carry the access macOS grants for that one drop, as a
+/// security-scoped resource. It has to be started while the drop is still being handled and kept
+/// until the move or copy is done. Ending it early, or working from a URL rebuilt from a path or
+/// from bytes, can fail with "Operation not permitted" for protected folders like Desktop and
+/// Downloads, also with the app sandbox off.
+final class TrayDropAccess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: [URL]
+    private let stop: @Sendable (URL) -> Void
+
+    init(
+        _ urls: [URL],
+        start: (URL) -> Bool = TrayDropAccess.startScoped,
+        stop: @escaping @Sendable (URL) -> Void = TrayDropAccess.stopScoped
+    ) {
+        held = urls.filter(start)
+        self.stop = stop
+    }
+
+    /// Releases the access. Safe to call more than once; the last owner going away also ends it.
+    func end() {
+        lock.lock()
+        let released = held
+        held = []
+        lock.unlock()
+        released.forEach(stop)
+    }
+
+    deinit { end() }
+
+    static func startScoped(_ url: URL) -> Bool {
+        #if os(macOS)
+        return url.startAccessingSecurityScopedResource()
+        #else
+        return false
+        #endif
+    }
+
+    @Sendable static func stopScoped(_ url: URL) {
+        #if os(macOS)
+        url.stopAccessingSecurityScopedResource()
+        #endif
+    }
+}
+
+/// File URLs handed over by a drop, in whatever shape the pasteboard used.
+enum TrayInbound {
+    /// File URLs only, as real paths: Finder can hand over file reference URLs (`/.file/id=…`).
+    static func fileURLs(_ urls: [URL]) -> [URL] {
+        urls.filter(\.isFileURL).map { ($0 as NSURL).filePathURL ?? $0 }
+    }
+
+    /// A `public.file-url` item as `NSItemProvider.loadItem` returns it: a URL, its data
+    /// representation, or the URL or a plain path as text.
+    static func fileURL(from item: Any?) -> URL? {
+        let url: URL?
+        switch item {
+        case let value as URL:
+            url = value
+        case let data as Data:
+            url = String(data: data, encoding: .utf8).flatMap(fileURL(fromText:))
+                ?? URL(dataRepresentation: data, relativeTo: nil)
+        case let text as String:
+            url = fileURL(fromText: text)
+        default:
+            url = nil
+        }
+        guard let url, url.isFileURL else { return nil }
+        return fileURLs([url]).first
+    }
+
+    private static func fileURL(fromText raw: String) -> URL? {
+        let text = raw.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\0")))
+        guard !text.isEmpty else { return nil }
+        if text.hasPrefix("/") { return URL(fileURLWithPath: text) }
+        return URL(string: text)
     }
 }
 
@@ -217,6 +332,14 @@ enum TrayDropIntent: Equatable, Sendable {
 struct TrayFailure: Equatable, Sendable {
     var name: String
     var reason: String
+}
+
+/// A file from outside that has to be copied in: it is on another disk, the drop asked for a copy,
+/// or moving it did not work.
+struct TrayPendingCopy: Equatable, Sendable {
+    var source: URL
+    /// A move was asked for, so the report says the original stayed.
+    var wantedMove: Bool
 }
 
 /// Outcome of a drop or a move inside the tray.
@@ -384,17 +507,24 @@ struct TrayFileSystem: Sendable {
     /// Brings files from outside into `folder`. URLs already inside the tray are moved between
     /// tray folders instead. Name clashes get a Finder-style number, never an overwrite.
     func importItems(_ sources: [URL], into folder: String, mode: TrayDropMode) -> TrayTransferReport {
+        var (report, copies) = moveIn(sources, into: folder, mode: mode)
+        report.merge(copyIn(copies, into: folder))
+        return report
+    }
+
+    /// The quick half of `importItems`: moves between tray folders and same-disk moves from
+    /// outside, which are renames. Whatever has to be copied comes back for `copyIn`.
+    func moveIn(_ sources: [URL], into folder: String, mode: TrayDropMode) -> (report: TrayTransferReport, copies: [TrayPendingCopy]) {
         var report = TrayTransferReport()
         if folder.isEmpty { try? ensureRoot() }
-        guard let target = url(for: folder), Self.isFolder(at: target) else {
-            let reason = TrayError.notFound(TrayPath.title(of: folder)).localizedDescription
-            report.failures = sources.map { TrayFailure(name: $0.lastPathComponent, reason: reason) }
-            return report
+        guard let target = existingFolder(folder) else {
+            report.failures = sources.map { TrayFailure(name: $0.lastPathComponent, reason: Self.missingFolder(folder)) }
+            return (report, [])
         }
 
-        let fm = FileManager.default
         var seen = Set<String>()
         var inside: [String] = []
+        var copies: [TrayPendingCopy] = []
         for source in sources where source.isFileURL {
             let original = source.standardizedFileURL
             guard seen.insert(original.path).inserted else { continue }
@@ -403,7 +533,7 @@ struct TrayFileSystem: Sendable {
                 continue
             }
             let name = original.lastPathComponent
-            guard Self.itemExists(at: original) else {
+            guard !Self.isMissing(original) else {
                 report.failures.append(TrayFailure(name: name, reason: "原文件找不到了"))
                 continue
             }
@@ -411,39 +541,68 @@ struct TrayFileSystem: Sendable {
                 report.failures.append(TrayFailure(name: name, reason: TrayError.containsTray.localizedDescription))
                 continue
             }
-
-            let finalName = TrayNaming.uniqueName(name, isFolder: Self.isFolder(at: original)) {
-                Self.itemExists(at: target.appendingPathComponent($0))
+            guard mode == .move, Self.sameVolume(original, target) else {
+                copies.append(TrayPendingCopy(source: original, wantedMove: mode == .move))
+                continue
             }
-            let destination = target.appendingPathComponent(finalName)
-            let path = TrayPath.join(folder, finalName)
 
-            if mode == .move, Self.sameVolume(original, target) {
-                do {
-                    try fm.moveItem(at: original, to: destination)
-                    report.moved.append(path)
-                    continue
-                } catch {
-                    // A locked or read-only original can still be copied; fall through.
-                    guard !Self.itemExists(at: destination) else {
-                        report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
-                        continue
-                    }
-                }
-            }
+            let (destination, path) = landing(for: original, in: target, folder: folder)
             do {
-                try fm.copyItem(at: original, to: destination)
-                report.copied.append(path)
-                if mode == .move { report.keptOriginals += 1 }
+                try FileManager.default.moveItem(at: original, to: destination)
+                report.moved.append(path)
             } catch {
-                try? fm.removeItem(at: destination)
-                report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
+                if Self.itemExists(at: destination) {
+                    report.failures.append(TrayFailure(name: name, reason: TrayError.describe(error)))
+                } else {
+                    // A locked or read-only original can still be copied.
+                    copies.append(TrayPendingCopy(source: original, wantedMove: true))
+                }
             }
         }
         if !inside.isEmpty {
             report.merge(move(inside, into: folder))
         }
+        return (report, copies)
+    }
+
+    /// The slow half of `importItems`: copies, which take a while for big files.
+    func copyIn(_ copies: [TrayPendingCopy], into folder: String) -> TrayTransferReport {
+        var report = TrayTransferReport()
+        guard !copies.isEmpty else { return report }
+        guard let target = existingFolder(folder) else {
+            report.failures = copies.map { TrayFailure(name: $0.source.lastPathComponent, reason: Self.missingFolder(folder)) }
+            return report
+        }
+        let fm = FileManager.default
+        for copy in copies {
+            let (destination, path) = landing(for: copy.source, in: target, folder: folder)
+            do {
+                try fm.copyItem(at: copy.source, to: destination)
+                report.copied.append(path)
+                if copy.wantedMove { report.keptOriginals += 1 }
+            } catch {
+                try? fm.removeItem(at: destination)
+                report.failures.append(TrayFailure(name: copy.source.lastPathComponent, reason: TrayError.describe(error)))
+            }
+        }
         return report
+    }
+
+    private func existingFolder(_ folder: String) -> URL? {
+        guard let target = url(for: folder), Self.isFolder(at: target) else { return nil }
+        return target
+    }
+
+    private static func missingFolder(_ folder: String) -> String {
+        TrayError.notFound(TrayPath.title(of: folder)).localizedDescription
+    }
+
+    /// Where `original` lands in `target`, numbered Finder-style if the name is taken.
+    private func landing(for original: URL, in target: URL, folder: String) -> (url: URL, path: String) {
+        let finalName = TrayNaming.uniqueName(original.lastPathComponent, isFolder: Self.isFolder(at: original)) {
+            Self.itemExists(at: target.appendingPathComponent($0))
+        }
+        return (target.appendingPathComponent(finalName), TrayPath.join(folder, finalName))
     }
 
     /// Moves tray items into another tray folder.
@@ -614,6 +773,17 @@ struct TrayFileSystem: Sendable {
     /// Exists, without following a symlink at the end (a broken link still counts).
     static func itemExists(at url: URL) -> Bool {
         (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
+    }
+
+    /// Really gone. A folder on the way that may not be read makes even looking the item up fail;
+    /// that is left to the move or copy, which says why.
+    static func isMissing(_ url: URL) -> Bool {
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            return false
+        } catch {
+            return TrayError.isNoSuchFile(error)
+        }
     }
 
     /// A real folder you can open in the tray: not a symlink, and not an app or other package.
@@ -795,24 +965,45 @@ final class FileTray: ObservableObject {
         }
     }
 
-    /// Files dropped on the tray, or tray items dropped on one of its folders. Copies of big
-    /// files run off the main thread.
+    /// Files dropped on the tray, or tray items dropped on one of its folders.
+    ///
+    /// Call it from the drop callback itself. Renames (tray moves, same-disk moves from Finder)
+    /// are done before it returns, while the access that came with the drop is certainly valid.
+    /// Copies continue off the main thread, and `access` is held until the last one is done.
     @discardableResult
-    func receive(_ urls: [URL], into target: String? = nil, mode: TrayDropMode? = nil) async -> TrayTransferReport {
+    func take(_ urls: [URL], into target: String? = nil, mode: TrayDropMode? = nil, access: TrayDropAccess? = nil) -> Task<TrayTransferReport, Never> {
         let destination = target ?? folder
         guard !urls.isEmpty else {
+            access?.end()
             post("只收文件和文件夹，这次什么也没放进来", problem: true)
-            return TrayTransferReport()
+            return Task { TrayTransferReport() }
         }
-        let fileSystem = fileSystem
         let chosen = mode ?? dropMode
+        let (renamed, copies) = fileSystem.moveIn(urls, into: destination, mode: chosen)
+        guard !copies.isEmpty else {
+            access?.end()
+            finish(renamed, destination: destination)
+            return Task { renamed }
+        }
+        if !renamed.arrived.isEmpty { refresh() }
+        let fileSystem = fileSystem
         importsInFlight += 1
-        let report = await Task.detached(priority: .userInitiated) {
-            fileSystem.importItems(urls, into: destination, mode: chosen)
-        }.value
-        importsInFlight -= 1
-        finish(report, destination: destination)
-        return report
+        return Task {
+            let copied = await Task.detached(priority: .userInitiated) {
+                defer { access?.end() }
+                return fileSystem.copyIn(copies, into: destination)
+            }.value
+            importsInFlight -= 1
+            var report = renamed
+            report.merge(copied)
+            finish(report, destination: destination)
+            return report
+        }
+    }
+
+    @discardableResult
+    func receive(_ urls: [URL], into target: String? = nil, mode: TrayDropMode? = nil, access: TrayDropAccess? = nil) async -> TrayTransferReport {
+        await take(urls, into: target, mode: mode, access: access).value
     }
 
     @discardableResult

@@ -60,6 +60,41 @@ private struct TraySandbox {
     func exists(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.path)
     }
+
+    /// Runs `body` with `folder` set to `mode`, and puts it back so the sandbox can be cleaned up.
+    /// Skips when permissions do not bind (running as root).
+    func withPermissions<T>(_ mode: Int, on folder: URL, _ body: () async throws -> T) async throws -> T {
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: folder.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+        guard !fm.isWritableFile(atPath: folder.path) else { throw XCTSkip("permissions do not apply to this user") }
+        return try await body()
+    }
+}
+
+/// Records what a `TrayDropAccess` started and stopped.
+private final class AccessLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _started: [URL] = []
+    private var _stopped: [URL] = []
+
+    var started: [URL] { lock.lock(); defer { lock.unlock() }; return _started }
+    var stopped: [URL] { lock.lock(); defer { lock.unlock() }; return _stopped }
+
+    func access(_ urls: [URL], granted: (URL) -> Bool = { _ in true }) -> TrayDropAccess {
+        TrayDropAccess(
+            urls,
+            start: { url in
+                self.lock.lock(); defer { self.lock.unlock() }
+                self._started.append(url)
+                return granted(url)
+            },
+            stop: { url in
+                self.lock.lock(); defer { self.lock.unlock() }
+                self._stopped.append(url)
+            }
+        )
+    }
 }
 
 final class TrayNamingTests: XCTestCase {
@@ -244,7 +279,63 @@ final class TrayFileSystemTests: XCTestCase {
         let gone = box.desktop.appendingPathComponent("gone.txt")
         let report = box.fileSystem.importItems([gone], into: "", mode: .move)
         XCTAssertEqual(report.failures.map(\.name), ["gone.txt"])
+        XCTAssertEqual(report.failures.first?.reason, "原文件找不到了")
         XCTAssertTrue(report.summary(destination: TrayPath.rootTitle).contains("没放进来"))
+    }
+
+    func testAnOriginalThatMayNotBeReadIsAPermissionProblemNotAMissingFile() async throws {
+        let box = try TraySandbox()
+        let locked = try box.desktopFolder("私密", files: ["secret.txt": "x"])
+        let secret = locked.appendingPathComponent("secret.txt")
+
+        let report = try await box.withPermissions(0o000, on: locked) {
+            box.fileSystem.importItems([secret], into: "", mode: .move)
+        }
+
+        XCTAssertTrue(report.arrived.isEmpty)
+        let reason = try XCTUnwrap(report.failures.first?.reason)
+        XCTAssertTrue(["没有权限", "没有读取它的权限", "没有写入那里的权限"].contains(reason), reason)
+        XCTAssertNotEqual(reason, TrayError.privacyBlocked, "plain file permissions are not macOS privacy protection")
+        XCTAssertTrue(try box.names().isEmpty)
+        XCTAssertTrue(box.exists(secret))
+    }
+
+    func testMoveInRenamesAndLeavesCopiesForCopyIn() throws {
+        let box = try TraySandbox()
+        let moved = try box.desktopFile("moved.txt")
+        let copied = try box.desktopFile("copied.txt", "copy me")
+
+        let first = box.fileSystem.moveIn([moved], into: "", mode: .move)
+        XCTAssertEqual(first.report.moved, ["moved.txt"])
+        XCTAssertTrue(first.copies.isEmpty, "a same-disk move is only a rename")
+
+        let second = box.fileSystem.moveIn([copied], into: "", mode: .copy)
+        XCTAssertTrue(second.report.arrived.isEmpty)
+        XCTAssertEqual(second.copies, [TrayPendingCopy(source: copied.standardizedFileURL, wantedMove: false)])
+        XCTAssertEqual(try box.names(), ["moved.txt"], "nothing copied yet")
+
+        let report = box.fileSystem.copyIn(second.copies, into: "")
+        XCTAssertEqual(report.copied, ["copied.txt"])
+        XCTAssertEqual(report.keptOriginals, 0)
+        XCTAssertEqual(box.text("copied.txt"), "copy me")
+        XCTAssertTrue(box.exists(copied))
+    }
+
+    func testAnOriginalThatCannotBeMovedIsCopied() async throws {
+        let box = try TraySandbox()
+        let readOnly = try box.desktopFolder("只读", files: ["kept.txt": "kept"])
+        let kept = readOnly.appendingPathComponent("kept.txt")
+
+        let (report, copies, copied) = try await box.withPermissions(0o555, on: readOnly) {
+            let (report, copies) = box.fileSystem.moveIn([kept], into: "", mode: .move)
+            return (report, copies, box.fileSystem.copyIn(copies, into: ""))
+        }
+
+        XCTAssertTrue(report.failures.isEmpty)
+        XCTAssertEqual(copies, [TrayPendingCopy(source: kept.standardizedFileURL, wantedMove: true)])
+        XCTAssertEqual(copied.copied, ["kept.txt"])
+        XCTAssertEqual(copied.keptOriginals, 1)
+        XCTAssertTrue(box.exists(kept))
     }
 
     func testListingHidesDotFilesAndPutsFoldersFirst() throws {
@@ -410,6 +501,62 @@ final class TrayReportTests: XCTestCase {
         XCTAssertEqual(TrayDeleteReport(removed: 1).summary, "已删除 1 项")
     }
 
+    func testPermissionErrorsSayWhoRefused() {
+        func cocoa(_ code: CocoaError.Code, posix: POSIXErrorCode?) -> CocoaError {
+            guard let posix else { return CocoaError(code) }
+            let underlying = NSError(domain: NSPOSIXErrorDomain, code: Int(posix.rawValue))
+            return CocoaError(code, userInfo: [NSUnderlyingErrorKey: underlying])
+        }
+        // What macOS throws for Desktop or Downloads without the drop's access: 513 over EPERM.
+        XCTAssertEqual(TrayError.describe(cocoa(.fileWriteNoPermission, posix: .EPERM)), TrayError.privacyBlocked)
+        XCTAssertEqual(TrayError.describe(cocoa(.fileReadNoPermission, posix: .EPERM)), TrayError.privacyBlocked)
+        XCTAssertEqual(TrayError.describe(POSIXError(.EPERM)), TrayError.privacyBlocked)
+        XCTAssertTrue(TrayError.privacyBlocked.contains("文件与文件夹"))
+
+        XCTAssertEqual(TrayError.describe(cocoa(.fileReadNoPermission, posix: .EACCES)), "没有读取它的权限")
+        XCTAssertEqual(TrayError.describe(cocoa(.fileWriteNoPermission, posix: .EACCES)), "没有写入那里的权限")
+        XCTAssertEqual(TrayError.describe(cocoa(.fileReadNoPermission, posix: nil)), "没有权限")
+        XCTAssertEqual(TrayError.describe(cocoa(.fileWriteOutOfSpace, posix: nil)), "磁盘空间不够")
+
+        XCTAssertTrue(TrayError.isNoSuchFile(cocoa(.fileReadNoSuchFile, posix: nil)))
+        XCTAssertTrue(TrayError.isNoSuchFile(POSIXError(.ENOENT)))
+        XCTAssertFalse(TrayError.isNoSuchFile(cocoa(.fileReadNoPermission, posix: .EACCES)))
+    }
+
+    func testDroppedFileURLsComeInEveryPasteboardShape() {
+        let file = URL(fileURLWithPath: "/tmp/放着/a b.txt")
+        XCTAssertEqual(TrayInbound.fileURL(from: file)?.path, file.path)
+        XCTAssertEqual(TrayInbound.fileURL(from: file.dataRepresentation)?.path, file.path)
+        XCTAssertEqual(TrayInbound.fileURL(from: Data(file.absoluteString.utf8))?.path, file.path)
+        XCTAssertEqual(TrayInbound.fileURL(from: Data("/tmp/放着/a b.txt\0".utf8))?.path, file.path)
+        XCTAssertEqual(TrayInbound.fileURL(from: " /tmp/放着/a b.txt\n")?.path, file.path)
+        XCTAssertEqual(TrayInbound.fileURL(from: file.absoluteString)?.path, file.path)
+        XCTAssertNil(TrayInbound.fileURL(from: "https://x.ai/grok"))
+        XCTAssertNil(TrayInbound.fileURL(from: Data()))
+        XCTAssertNil(TrayInbound.fileURL(from: nil))
+        XCTAssertNil(TrayInbound.fileURL(from: 42))
+
+        XCTAssertEqual(TrayInbound.fileURLs([file, URL(string: "https://x.ai")!]), [file])
+    }
+
+    func testDropAccessStartsAtOnceAndEndsExactlyOnce() {
+        let log = AccessLog()
+        let a = URL(fileURLWithPath: "/tmp/a.txt")
+        let b = URL(fileURLWithPath: "/tmp/b.txt")
+        let plain = URL(fileURLWithPath: "/tmp/plain.txt")
+
+        let access = log.access([a, b, plain], granted: { $0 != plain })
+        XCTAssertEqual(log.started, [a, b, plain], "started while the drop is still being handled")
+        XCTAssertEqual(log.stopped, [])
+
+        access.end()
+        access.end()
+        XCTAssertEqual(log.stopped, [a, b], "only what was granted is stopped, and only once")
+
+        do { _ = log.access([plain]) }
+        XCTAssertEqual(log.stopped, [a, b, plain], "a forgotten access still ends")
+    }
+
     func testDropModeFlips() {
         XCTAssertEqual(TrayDropMode.move.flipped, .copy)
         XCTAssertEqual(TrayDropMode.copy.flipped, .move)
@@ -461,8 +608,58 @@ final class FileTrayModelTests: XCTestCase {
 
     func testEmptyDropSaysNothingWasTaken() async throws {
         let tray = makeTray(try TraySandbox())
-        await tray.receive([])
+        let log = AccessLog()
+        let link = URL(string: "https://x.ai")!
+        await tray.receive([], access: log.access([link]))
         XCTAssertEqual(tray.notice?.isProblem, true)
+        XCTAssertEqual(log.stopped, [link])
+    }
+
+    func testADropMovesBeforeTakeReturnsThenEndsItsAccess() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let a = try box.desktopFile("a.txt")
+        let log = AccessLog()
+
+        let task = tray.take([a], access: log.access([a]))
+
+        // No await yet: still inside the drop callback, as far as the drop is concerned.
+        XCTAssertTrue(box.exists(box.root.appendingPathComponent("a.txt")))
+        XCTAssertFalse(box.exists(a))
+        XCTAssertEqual(tray.entries.map(\.name), ["a.txt"])
+        XCTAssertEqual(tray.notice?.text, "已移进「暂存」1 项")
+        XCTAssertFalse(tray.isImporting)
+        XCTAssertEqual(log.stopped, [a])
+
+        let report = await task.value
+        XCTAssertEqual(report.moved, ["a.txt"])
+    }
+
+    func testCopiesHoldTheDropAccessUntilTheyAreDone() async throws {
+        let box = try TraySandbox()
+        let tray = makeTray(box)
+        let moved = try box.desktopFile("moved.txt")
+        let readOnly = try box.desktopFolder("只读", files: ["kept.txt": "kept"])
+        let kept = readOnly.appendingPathComponent("kept.txt")
+        let log = AccessLog()
+
+        let report = try await box.withPermissions(0o555, on: readOnly) { () async -> TrayTransferReport in
+            let task = tray.take([moved, kept], mode: .move, access: log.access([moved, kept]))
+
+            XCTAssertEqual(tray.entries.map(\.name), ["moved.txt"], "the rename shows up right away")
+            XCTAssertTrue(tray.isImporting)
+            XCTAssertEqual(log.stopped, [], "the copy has not run yet")
+
+            return await task.value
+        }
+
+        XCTAssertEqual(report.moved, ["moved.txt"])
+        XCTAssertEqual(report.copied, ["kept.txt"])
+        XCTAssertEqual(Set(log.stopped), [moved, kept])
+        XCTAssertFalse(tray.isImporting)
+        XCTAssertTrue(box.exists(kept), "an original that cannot move stays where it was")
+        XCTAssertEqual(Set(tray.entries.map(\.name)), ["moved.txt", "kept.txt"])
+        XCTAssertEqual(tray.notice?.text, "已移进「暂存」1 项，另拷贝 1 项（1 项在别的磁盘或移不动，原件留着）")
     }
 
     func testOpenAndGoUpAndAVanishedFolderFallsBackToTheRoot() async throws {
