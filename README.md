@@ -69,7 +69,7 @@ chunks. Each module has a name, a prompt, and an executor:
 
 | Executor | What it does |
 | --- | --- |
-| **Grok Bot** | Sends the prompt and the dropped resources to the model provider chosen in Settings (xAI, OpenAI, DeepSeek, local Ollama, an OpenAI-compatible endpoint, or Cursor Cloud Agents). |
+| **Grok Bot** | Sends the prompt and the dropped resources to the model provider chosen in Settings (xAI, OpenAI, DeepSeek, Anthropic / Claude, local Ollama, an OpenAI-compatible endpoint, or Cursor Cloud Agents). |
 | **Local** | Runs on your Mac: optionally opens the dropped files, and optionally runs a shell command that you type and confirm. |
 
 How to use them:
@@ -123,14 +123,16 @@ selected in Settings. A Cursor account is not required.
 | **xAI (Grok)** | An API key from [console.x.ai](https://console.x.ai/). Default model `grok-4.6`, which accepts screenshots. |
 | **OpenAI** | An API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Default model `gpt-4o`. |
 | **DeepSeek** | An API key from [platform.deepseek.com](https://platform.deepseek.com/api_keys). Default model `deepseek-flash`, which accepts screenshots. |
+| **Anthropic (Claude)** | An API key from [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (`sk-ant-…`). Default model `claude-sonnet-5-5`. Calls the Messages API, and accepts screenshots. |
 | **Local Ollama** | Ollama running on your Mac. Default address `http://127.0.0.1:11434/v1`. No API key. Type a model name (a vision model if you want the shortcut screenshots to be read). |
 | **OpenAI-compatible** | Any endpoint that speaks chat completions: base URL, API key, and model name. |
 | **Cursor (advanced)** | A Cursor API key. Answers run as a Cloud Agent with no repository attached. |
 
-For every non-Cursor provider the app sends one OpenAI-compatible
-`POST /chat/completions` request. Shortcut buttons attach the frontmost-window
-screenshot as an image. If the chosen model cannot take images, the run fails
-with a clear message and the screenshot is not silently dropped.
+xAI, OpenAI, DeepSeek, Ollama, and OpenAI-compatible endpoints use one
+OpenAI-style `POST /chat/completions` request. Claude uses Anthropic's Messages
+API (`POST /v1/messages`) with the key in `x-api-key`. Shortcut buttons attach
+the frontmost-window screenshot as an image. If the chosen model cannot take
+images, the run fails with a clear message and the screenshot is not silently dropped.
 
 **Cursor Cloud Agents** remain available from the same provider menu. In that mode
 the app still creates a no-repo agent with `POST /v1/agents`, polls until it
@@ -196,7 +198,7 @@ field. Each one:
 
 - macOS 14 (Sonoma) or later
 - Xcode 15 or later
-- For Ask Grok, the shortcut buttons, and split-task: an API key for xAI, OpenAI, or DeepSeek, a local Ollama, or any OpenAI-compatible endpoint. A Cursor account is optional.
+- For Ask Grok, the shortcut buttons, and split-task: an API key for xAI, OpenAI, DeepSeek, or Anthropic (Claude), a local Ollama, or any OpenAI-compatible endpoint. A Cursor account is optional.
 - Optional, for Cloud Agent status: a Cursor API key
 - Optional, for PR status: the `origin` CLI installed and signed in
 
@@ -248,9 +250,9 @@ Open the settings pane with the **gear** button on the island.
 
 | Setting | Purpose |
 | --- | --- |
-| **模型服务** ("Model service") | Which backend answers Ask Grok, the shortcut buttons, and split-task. Choose xAI, OpenAI, DeepSeek, local Ollama, an OpenAI-compatible endpoint, or Cursor (advanced). |
-| **API key** | The key for the selected service. Paste it and click Save. You can clear it at any time. Ollama can be left blank. xAI keys come from [console.x.ai](https://console.x.ai/), OpenAI from [platform.openai.com/api-keys](https://platform.openai.com/api-keys), DeepSeek from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys), and Cursor from [cursor.com/dashboard/api](https://cursor.com/dashboard/api). |
-| **模型** ("Model") | The model name. xAI defaults to `grok-4.6`, OpenAI to `gpt-4o`, and DeepSeek to `deepseek-flash`. Ollama and compatible endpoints need a name you type. For Cursor, leave the Grok model ID empty to pick one from `/v1/models`. |
+| **模型服务** ("Model service") | Which backend answers Ask Grok, the shortcut buttons, and split-task. Choose xAI, OpenAI, DeepSeek, Anthropic (Claude), local Ollama, an OpenAI-compatible endpoint, or Cursor (advanced). |
+| **API key** | The key for the selected service. Paste it and click Save. You can clear it at any time. Ollama can be left blank. xAI keys come from [console.x.ai](https://console.x.ai/), OpenAI from [platform.openai.com/api-keys](https://platform.openai.com/api-keys), DeepSeek from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys), Anthropic from [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys), and Cursor from [cursor.com/dashboard/api](https://cursor.com/dashboard/api). |
+| **模型** ("Model") | The model name. xAI defaults to `grok-4.6`, OpenAI to `gpt-4o`, DeepSeek to `deepseek-flash`, and Anthropic to `claude-sonnet-5-5`. Ollama and compatible endpoints need a name you type. For Cursor, leave the Grok model ID empty to pick one from `/v1/models`. |
 | **接口地址** ("Base URL") | Shown for Ollama (default `http://127.0.0.1:11434/v1`) and for an OpenAI-compatible endpoint. |
 | **PR repository** | The `owner/name` repository whose open PRs drive the PR lights. Defaults to `leowang142857/GrokIsland`. |
 | **Screen Recording** | Shows whether the permission is granted, with a shortcut to System Settings. |
@@ -289,9 +291,9 @@ that no Cursor key is set.
 - **No secrets live in this repository.** The app never ships with an API key.
   Each provider key is entered at runtime and stored only on your Mac, as its own
   `0600` file under `~/Library/Application Support/GrokIsland/` (`cursor-api-key`,
-  `xai-api-key`, `openai-api-key`, `deepseek-api-key`, `ollama-api-key`,
-  `compatible-api-key`). A key is sent only to that provider, as a bearer token,
-  and is never written to logs.
+  `xai-api-key`, `openai-api-key`, `deepseek-api-key`, `anthropic-api-key`,
+  `ollama-api-key`, `compatible-api-key`). A key is sent only to that provider
+  (a bearer token, or `x-api-key` for Anthropic) and is never written to logs.
 - Keys are stored in files rather than the login Keychain because ad-hoc
   signed development builds get a new code identity on every rebuild, which
   would trigger a Keychain prompt each time.
@@ -323,6 +325,7 @@ Everything is kept locally under `~/Library/Application Support/GrokIsland/`:
 | `xai-api-key` | xAI API key (`0600`) |
 | `openai-api-key` | OpenAI API key (`0600`) |
 | `deepseek-api-key` | DeepSeek API key (`0600`) |
+| `anthropic-api-key` | Anthropic / Claude API key (`0600`) |
 | `ollama-api-key` | Optional Ollama key (`0600`) |
 | `compatible-api-key` | OpenAI-compatible API key (`0600`) |
 
@@ -373,6 +376,7 @@ on their own.
 | `GrokBotExecutor` / `GrokBotClient` | Grok executor facade; the app injects `RoutedGrokClient` |
 | `ModelProviderKind` / `IslandSettingsStorage` | Provider choice, per-provider API key files, model id, and base URL |
 | `ChatCompletionClient` / `ChatCompletionGrokClient` | OpenAI-compatible chat completions, including image input |
+| `AnthropicMessagesClient` | Anthropic Messages API (`POST /v1/messages`), including image blocks |
 | `ChatSplitTaskOrchestrator` | Split-task planner, parallel subtasks, and summary as model calls |
 | `CursorCloudAPI` / `CursorAgentGrokClient` | Cursor Cloud Agents API v1 client, and the Grok client built on it |
 | `CloudActivityMonitor` | Polls Cloud Agents (Cursor API) and open PRs (`origin` CLI) |
@@ -441,6 +445,7 @@ GrokIsland/
   CursorCloudAPI.swift        # Cursor Cloud Agents API + Grok client
   ModelProvider.swift          # Provider catalog, key files, image-input policy
   ChatCompletionAPI.swift      # OpenAI-compatible chat client, routing, model split-task
+  AnthropicMessagesAPI.swift   # Anthropic Messages client (Claude)
   CloudActivity.swift         # Cloud Agent / PR polling via origin CLI
   GrokQuickActions.swift      # quick-action prompts
   RunJournal.swift            # persisted run records

@@ -8,6 +8,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
     case xai
     case openai
     case deepseek
+    case anthropic
     case ollama
     case compatible
     case cursor
@@ -19,6 +20,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .xai: return "xAI（Grok）"
         case .openai: return "OpenAI"
         case .deepseek: return "DeepSeek"
+        case .anthropic: return "Anthropic（Claude）"
         case .ollama: return "本地 Ollama"
         case .compatible: return "OpenAI 兼容"
         case .cursor: return "Cursor（高级）"
@@ -31,6 +33,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .xai: return "grok-4.6"
         case .openai: return "gpt-4o"
         case .deepseek: return "deepseek-flash"
+        case .anthropic: return "claude-sonnet-5-5"
         case .ollama, .compatible, .cursor: return ""
         }
     }
@@ -40,6 +43,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .xai: return "https://api.x.ai/v1"
         case .openai: return "https://api.openai.com/v1"
         case .deepseek: return "https://api.deepseek.com"
+        case .anthropic: return "https://api.anthropic.com"
         case .ollama: return "http://127.0.0.1:11434/v1"
         case .compatible: return ""
         case .cursor: return "https://api.cursor.com"
@@ -51,6 +55,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .xai: return "grok-4.6"
         case .openai: return "gpt-4o"
         case .deepseek: return "deepseek-flash"
+        case .anthropic: return "claude-sonnet-5-5"
         case .ollama: return "例如 llava、llama3.2-vision"
         case .compatible: return "服务商文档里的模型 ID"
         case .cursor: return "留空：自动选一个 Grok 模型"
@@ -61,6 +66,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         switch self {
         case .xai: return "xai-…"
         case .openai, .deepseek: return "sk-…"
+        case .anthropic: return "sk-ant-…"
         case .ollama: return "一般留空"
         case .compatible: return "API key"
         case .cursor: return "crsr_…"
@@ -78,6 +84,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .xai: return "xai-api-key"
         case .openai: return "openai-api-key"
         case .deepseek: return "deepseek-api-key"
+        case .anthropic: return "anthropic-api-key"
         case .ollama: return "ollama-api-key"
         case .compatible: return "compatible-api-key"
         }
@@ -88,6 +95,7 @@ enum ModelProviderKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .xai: return URL(string: "https://console.x.ai/")
         case .openai: return URL(string: "https://platform.openai.com/api-keys")
         case .deepseek: return URL(string: "https://platform.deepseek.com/api_keys")
+        case .anthropic: return URL(string: "https://console.anthropic.com/settings/keys")
         case .ollama: return URL(string: "https://ollama.com/download")
         case .compatible: return nil
         case .cursor: return URL(string: "https://cursor.com/dashboard/api")
@@ -135,8 +143,8 @@ struct ModelProviderResolution: Equatable, Sendable {
 }
 
 enum ModelProviderMessages {
-    static let firstRunBlocked = "还没有可用的模型：点岛右上角的齿轮，选一个服务（xAI、OpenAI、DeepSeek、本地 Ollama 或 OpenAI 兼容接口）并填入 API key。"
-    static let settingsHint = "先选一个模型服务，再填入 API key。xAI、OpenAI、DeepSeek 或本机 Ollama 都可以，不必有 Cursor 账号。"
+    static let firstRunBlocked = "还没有可用的模型：点岛右上角的齿轮，选一个服务（xAI、OpenAI、DeepSeek、Anthropic（Claude）、本地 Ollama 或 OpenAI 兼容接口）并填入 API key。"
+    static let settingsHint = "先选一个模型服务，再填入 API key。xAI、OpenAI、DeepSeek、Anthropic（Claude）或本机 Ollama 都可以，不必有 Cursor 账号。"
     static let gearHelp = "设置：先选模型服务并填入 API key"
 
     static func notReady(_ kind: ModelProviderKind) -> String {
@@ -147,13 +155,13 @@ enum ModelProviderMessages {
             return "还不能用本地 Ollama：点岛右上角的齿轮，确认地址（默认 http://127.0.0.1:11434/v1）并填写模型名。"
         case .compatible:
             return "还不能用 OpenAI 兼容接口：点岛右上角的齿轮，填写接口地址、API key 和模型名。"
-        case .xai, .openai, .deepseek:
+        case .xai, .openai, .deepseek, .anthropic:
             return "还没有 \(kind.settingsTitle) 的 API key：点岛右上角的齿轮选好服务并填入。"
         }
     }
 
     static func imagesUnsupported(model: String) -> String {
-        "模型 \(model) 不能接收图片。这次请求带有截图或图片，已停止，没有把图片丢掉后继续问。请换成支持视觉的模型（例如 grok-4.6、gpt-4o、deepseek-flash，或 Ollama 的视觉模型）。"
+        "模型 \(model) 不能接收图片。这次请求带有截图或图片，已停止，没有把图片丢掉后继续问。请换成支持视觉的模型（例如 grok-4.6、gpt-4o、deepseek-flash、claude-sonnet-5-5，或 Ollama 的视觉模型）。"
     }
 }
 
