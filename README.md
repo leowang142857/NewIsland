@@ -110,6 +110,13 @@ when you need them.
   tray's **⋯** menu (移进来，原处不留 "move in" / 拷贝一份，原文件不动 "copy").
   If an original can't be moved (locked, or macOS refuses), the tray keeps a
   copy and says the original stayed where it was.
+- **Files from other apps.** A file dragged out of an app like WeChat often
+  still sits inside that app's private container, which macOS doesn't let other
+  apps open. The tray asks the app for its own copy (its file representation or
+  file promise) and copies that in; it never moves such a file. If the app
+  hands nothing over, the tray says 来源 App 没交出可读文件（微信等）。请先存到桌面/文件夹，再拖进暂存
+  ("the app didn't hand over a readable file; save it to the Desktop or a
+  folder first, then drag it in").
 - **Nothing is overwritten.** A second `报告.pdf` arrives as `报告 2.pdf`.
 - **Organize inside.** Make a folder with the folder-plus button and name it in
   place. Double-click a folder to open it and use the breadcrumb to go back;
@@ -348,6 +355,10 @@ that no Cursor key is set.
   refuses even reading it, the tray says so and names the setting
   (**系统设置 → 隐私与安全性 → 文件与文件夹**, System Settings → Privacy &
   Security → Files and Folders) instead of a bare 没有权限 ("no permission").
+  That setting does not cover files inside another app's container
+  (`~/Library/Containers/…`, e.g. a PDF dragged out of WeChat); for those the
+  tray asks the source app for a copy, and otherwise points you to saving the
+  file somewhere ordinary first.
 - The app is not sandboxed and uses the outgoing network client entitlement.
 - Content you send (screenshots, URLs, inlined files, your prompt) goes to the
   provider you selected. With Cursor selected, it also appears as a Cloud Agent
@@ -527,6 +538,12 @@ Issues and pull requests are welcome.
   from an `NSItemProvider`, or start the transfer in a `Task` either: those URLs
   can lack the drop's access, and Desktop files then fail with "Operation not
   permitted".
+- What the source app can hand over itself (pasteboard bytes, file promises)
+  only exists during the drop, so `TrayDropSource` collects it in its `init`,
+  inside the callback. `FileTray.take` asks it first for files in another app's
+  container and again for anything the system refuses to copy; whatever an
+  `NSItemProvider` file representation gives back must be copied in inside its
+  completion handler, before the provider deletes it.
 - Never commit API keys or other credentials.
 
 No license file has been added yet.
