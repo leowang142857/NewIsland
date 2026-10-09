@@ -58,7 +58,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01C00000000000000000001F /* IslandBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000001F /* IslandBackground.swift */; };
 		01C000000000000000000024 /* BackgroundViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000024 /* BackgroundViews.swift */; };
 		01C000000000000000000025 /* PeekStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000025 /* PeekStrip.swift */; };
-		01C00000000000000000002A /* FileTray.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000002A /* FileTray.swift */; };
+		01C00000000000000000002C /* FileTray.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000002C /* FileTray.swift */; };
 		01C00000000000000000002B /* FileTrayViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B00000000000000000002B /* FileTrayViews.swift */; };
 		01C000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01B000000000000000000011 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -99,7 +99,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 		01B00000000000000000001F /* IslandBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandBackground.swift; sourceTree = "<group>"; };
 		01B000000000000000000024 /* BackgroundViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundViews.swift; sourceTree = "<group>"; };
 		01B000000000000000000025 /* PeekStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeekStrip.swift; sourceTree = "<group>"; };
-		01B00000000000000000002A /* FileTray.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTray.swift; sourceTree = "<group>"; };
+		01B00000000000000000002C /* FileTray.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTray.swift; sourceTree = "<group>"; };
 		01B00000000000000000002B /* FileTrayViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTrayViews.swift; sourceTree = "<group>"; };
 		01B00000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		01B000000000000000000010 /* GrokIsland.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GrokIsland.entitlements; sourceTree = "<group>"; };
@@ -143,7 +143,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01B00000000000000000001C /* TaskLights.swift */,
 				01B00000000000000000001F /* IslandBackground.swift */,
 				01B000000000000000000025 /* PeekStrip.swift */,
-				01B00000000000000000002A /* FileTray.swift */,
+				01B00000000000000000002C /* FileTray.swift */,
 			);
 			name = Core;
 			sourceTree = "<group>";
@@ -291,7 +291,7 @@ cat > "$PROJ/project.pbxproj" <<'EOF'
 				01C00000000000000000001F /* IslandBackground.swift in Sources */,
 				01C000000000000000000024 /* BackgroundViews.swift in Sources */,
 				01C000000000000000000025 /* PeekStrip.swift in Sources */,
-				01C00000000000000000002A /* FileTray.swift in Sources */,
+				01C00000000000000000002C /* FileTray.swift in Sources */,
 				01C00000000000000000002B /* FileTrayViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
