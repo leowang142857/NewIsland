@@ -23,7 +23,7 @@ final class IslandPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         hidesOnDeactivate = false
@@ -245,6 +245,8 @@ final class IslandPanelController {
         let size = presence.isRevealed ? Self.shellSize(on: screen) : Self.peekSize(on: screen)
         // Expanded: drop below the webcam/notch so the top-row middle stays readable.
         let next = ScreenAnchor.topCenterFrame(size: size, on: screen, clearsNotch: presence.isRevealed)
+        // The strip is part of the notch and casts nothing; the expanded column floats over the desktop.
+        if presence.isRevealed { panel.hasShadow = true }
         guard panel.frame != next else { return }
         if animated {
             // Soft settle, matched to `IslandChrome.expandSpring` on the SwiftUI scale.
@@ -254,10 +256,19 @@ final class IslandPanelController {
                 context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.22, 1.0)
                 context.allowsImplicitAnimation = true
                 panel.animator().setFrame(next, display: true)
+            } completionHandler: { [weak self] in
+                Task { @MainActor in self?.settleShadow() }
             }
         } else {
             panel.setFrame(next, display: true)
+            settleShadow()
         }
+    }
+
+    /// The shadow follows the content's alpha, so recompute it once the frame and content settle.
+    private func settleShadow() {
+        panel.hasShadow = presence.isRevealed
+        panel.invalidateShadow()
     }
 
     /// A tall column under the notch, as much of `IslandShell`'s 1 : 3 as the screen allows.
