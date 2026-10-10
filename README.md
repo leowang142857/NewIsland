@@ -45,19 +45,50 @@ platform-independent Swift package (`GrokIslandCore`) with its own test suite.
   you drag files across it; click again to unlock. Hovering the lock itself does
   not expand the island, so you can always reach it. The lock state is remembered
   across launches.
-- On Macs with a notch, the peek strip hugs the camera housing and only shows
-  about 56 pt on each side of the notch; the expanded island drops just below it.
-  On screens without a notch it is a ~164 pt capsule under the menu bar.
+- On Macs with a notch, the peek strip is exactly as tall as the notch and flares
+  into the top edge of the screen, so it reads as part of the camera housing. It
+  only shows about 56 pt on each side of the notch. On screens without a notch it
+  is a ~164 pt capsule under the menu bar.
+- The expanded island is a tall column that drops just below the notch:
+  **264 pt wide and up to three times as tall (792 pt)**. When the screen is too
+  short for that, it stops 12 pt above the Dock (or the bottom of the screen),
+  but never gets shorter than 520 pt. The ratio lives in `IslandShell`
+  (`PeekStrip.swift`).
 - Hover detection polls `NSEvent.mouseLocation`, so no Accessibility or Input
   Monitoring permission is needed.
 
+The header holds the status light and name (click for Cloud Agent and PR
+activity), then what is running, or the time when nothing is, then the **gear**
+(Settings) and the **pin**.
+
 When expanded, the island is organized in layers, from top to bottom:
 
-1. **Task lights** — one light per running or recently finished task.
+1. **Task lights** — one capsule per running or recently finished task.
 2. **DDL energy bar** — all open deadlines in one bar.
-3. **Grok quick actions** — three one-tap buttons plus an "Ask Grok" field.
-4. **Modules / staging tray / run records** — your module grid, the files you
+3. **Grok quick actions** — three one-tap tiles, an "Ask Grok" field, and a
+   split-task field.
+4. **Modules / staging tray / records** — your module grid, the files you
    parked on the island, or the history of runs.
+
+### Look and feel
+
+The island follows macOS Control Center rather than a dashboard:
+
+- One dark frosted column. Content sits on soft **platters** a step lighter than
+  the column, edged with hairlines rather than shadows. The window casts a shadow
+  only while the island is open.
+- Corners nest: the column's 24 pt corners sit 12 pt outside 12 pt platters, and
+  the send buttons are concentric with their capsule fields.
+- Controls are capsules and circles with clear targets (26 pt for header
+  glyphs): a white **prominent** capsule for the one main action in view, quiet
+  capsules for secondary ones, and red only for destructive ones. Segmented
+  controls slide a raised thumb between options.
+- Color carries meaning only: blue for what you're interacting with, and green,
+  amber, orange, and red for task states. Everything else is white at some
+  opacity, so custom backgrounds still look calm.
+- Copy is short, plain Chinese.
+
+Design tokens and the shared button styles live in `IslandChrome.swift`.
 
 When collapsed, the peek strip shows the collapse lock on the far left, then up
 to a few task lights (two lights plus a count when there are more than three),
@@ -77,7 +108,7 @@ chunks. Each module has a name, a prompt, and an executor:
 How to use them:
 
 - Click **新建模块** ("New module") to create one. With an empty list you can
-  also click **载入示例** ("Load examples") to add three demo modules: 翻译
+  also click **先放几个示例** ("Add a few examples") to add three demo modules: 翻译
   (Translate), 整理笔记 (Organize notes), and 打开文件 (Open files).
 - Click a tile to edit or delete the module.
 - **Drag files, folders, or links onto a tile** to run that module on them.
@@ -225,16 +256,16 @@ field. Each one:
 
 ### Run records
 
-- The **运行记录** ("Run records") page lists every run, with a filter to show
-  only Grok answers.
-- **清理已完成** ("Clear finished") removes all succeeded, failed, and cancelled
+- The **记录** ("Records") tab lists every run; switch **全部 / 回答** ("All /
+  Answers") to show only Grok answers.
+- **清掉已完成** ("Clear finished") removes all succeeded, failed, and cancelled
   records in one click. **选择** ("Select") enables multi-select delete; each row
   also has a trash button and a context menu. Deleting a running record cancels
   it first.
 - Records persist across restarts, so Grok answers are still there after you
   reopen the app. Runs that were still in progress when the app quit are marked
   as interrupted.
-- The "上次：…" ("Last: …") line on the home view reopens the most recent Grok
+- The "上次 …" ("Last …") line on the home view reopens the most recent Grok
   answer.
 
 ---
@@ -277,8 +308,8 @@ xcodebuild -scheme GrokIsland -configuration Debug -destination 'platform=macOS'
 
 ### Desktop shortcut
 
-To launch the app without Xcode, click the shortcut button in the island header,
-or run this on your Mac:
+To launch the app without Xcode, open Settings (the gear) and click **放到桌面**
+("Put on Desktop") under **其他** ("Other"), or run this on your Mac:
 
 ```bash
 ./scripts/make-desktop-shortcut.sh
@@ -291,7 +322,10 @@ Both copy the app to `~/Applications/NewIsland.app` and put a Finder alias named
 
 ## Configuration
 
-Open the settings pane with the **gear** button on the island.
+Open the settings pane with the **gear** button on the island. Settings are
+grouped like System Settings: 模型 (model), PR 仓库 (PR repository), 权限
+(permissions), 快捷按钮 (shortcut buttons), 岛背景 (island background), and 其他
+(other).
 
 | Setting | Purpose |
 | --- | --- |
@@ -301,7 +335,9 @@ Open the settings pane with the **gear** button on the island.
 | **接口地址** ("Base URL") | Shown for Ollama (default `http://127.0.0.1:11434/v1`) and for an OpenAI-compatible endpoint. |
 | **PR repository** | The `owner/name` repository whose open PRs drive the PR lights. Defaults to `leowang142857/GrokIsland`. |
 | **Screen Recording** | Shows whether the permission is granted, with a shortcut to System Settings. |
+| **快捷按钮** ("Shortcut buttons") | What each of the three home tiles does: a built-in action, or your own title, prompt, and icon. **恢复默认** ("Restore defaults") brings back the three built-ins. |
 | **Island background** | The expanded island's backdrop. Default is a quiet near-black frosted glass; you can switch to solid color, gradient (presets or custom stops/angle), or an image from disk (with blur). Click **默认** ("Default") anytime to return to it while keeping your custom colors and image for later. |
+| **桌面快捷方式** ("Desktop shortcut") | Under 其他. **放到桌面** ("Put on Desktop") copies the app to `~/Applications` and puts an alias on your Desktop. |
 
 The first launch asks you to pick a service and paste a key. It does not assume
 Cursor. Modules, deadlines, and Local runs still work with nothing filled in;
@@ -486,8 +522,8 @@ Package.swift                 # GrokIslandCore library + tests
 GrokIsland/
   GrokIslandApp.swift         # @main and AppDelegate
   IslandPanel.swift           # NSPanel host, hover reveal / retract, peek strip
-  PeekStrip.swift             # collapsed peek strip, collapse lock, notch hug
-  IslandChrome.swift          # glass backdrop, colors, animations
+  PeekStrip.swift             # peek strip and expanded island geometry, collapse lock
+  IslandChrome.swift          # design tokens, platters, buttons, glass backdrop
   IslandBackground.swift      # custom island background style, presets, veil
   ShellView.swift             # expanded island: header, layers, module grid
   ActivityViews.swift         # task lights and activity list
