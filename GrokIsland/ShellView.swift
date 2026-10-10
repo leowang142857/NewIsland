@@ -545,110 +545,136 @@ struct ShellView: View {
 
     // MARK: - Editor
 
+    /// Name and executor on the left, the prompt filling the right, the buttons under the prompt.
     private func editor(editingID: UUID?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("名称")
-                    .islandSectionLabel()
-                    .padding(.horizontal, 4)
-                TextField("比如：翻译、整理笔记、跑脚本", text: $draftName)
-                    .islandField()
+        HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("名称")
+                        .islandSectionLabel()
+                        .padding(.horizontal, 4)
+                    TextField("比如：翻译、整理笔记、跑脚本", text: $draftName)
+                        .islandField()
+                }
+                executorPicker
             }
+            .frame(width: IslandChrome.leadingColumnWidth)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("提示词")
-                    .islandSectionLabel()
-                    .padding(.horizontal, 4)
-                TextField("拖进来的东西要怎么处理", text: $draftPrompt, axis: .vertical)
-                    .lineLimit(3...8)
-                    .islandField()
+            IslandHairline(axis: .vertical)
+
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("提示词")
+                        .islandSectionLabel()
+                        .padding(.horizontal, 4)
+                    // Six lines fit the shortest island and nine the full one, buttons included,
+                    // even at the taller line height of Chinese text.
+                    TextField("拖进来的东西要怎么处理", text: $draftPrompt, axis: .vertical)
+                        .lineLimit(6...9)
+                        .islandField()
+                }
+                Spacer(minLength: 0)
+                editorButtons(editingID: editingID)
             }
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("交给谁")
-                    .islandSectionLabel()
-                    .padding(.horizontal, 4)
-                HStack(spacing: 0) {
-                    ForEach(ExecutorKind.allCases) { kind in
-                        IslandSegment(
-                            title: kind.title,
-                            selected: draftExecutor == kind,
-                            namespace: executorThumb
-                        ) {
-                            withAnimation(IslandChrome.selectSpring) { draftExecutor = kind }
-                        }
+    private var executorPicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("交给谁")
+                .islandSectionLabel()
+                .padding(.horizontal, 4)
+            HStack(spacing: 0) {
+                ForEach(ExecutorKind.allCases) { kind in
+                    IslandSegment(
+                        title: kind.title,
+                        selected: draftExecutor == kind,
+                        namespace: executorThumb
+                    ) {
+                        withAnimation(IslandChrome.selectSpring) { draftExecutor = kind }
                     }
                 }
-                .islandSegmentTrack()
-                Text(draftExecutor == .grokBot ? "交给 Grok，答案回到岛上。" : "在这台 Mac 上运行，每次都先问过你。")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 4)
             }
+            .islandSegmentTrack()
+            Text(draftExecutor == .grokBot ? "交给 Grok，答案回到岛上。" : "在这台 Mac 上运行，每次都先问过你。")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 4)
+        }
+    }
 
-            HStack(spacing: 6) {
-                Button(editingID == nil ? "创建" : "保存") {
-                    saveDraft(editingID: editingID)
-                }
-                .buttonStyle(.islandPill(.prominent))
-                .keyboardShortcut(.defaultAction)
-
-                if let editingID {
-                    Button("删除", role: .destructive) {
-                        do {
-                            try engine.deleteModule(id: editingID)
-                            route = .home
-                        } catch {
-                            engine.reportError(error)
-                        }
+    /// Delete on the left, the main action last, the way a Mac sheet orders them.
+    private func editorButtons(editingID: UUID?) -> some View {
+        HStack(spacing: 6) {
+            if let editingID {
+                Button("删除", role: .destructive) {
+                    do {
+                        try engine.deleteModule(id: editingID)
+                        route = .home
+                    } catch {
+                        engine.reportError(error)
                     }
-                    .buttonStyle(.islandPill(.destructive))
                 }
-                Spacer()
+                .buttonStyle(.islandPill(.destructive))
             }
             Spacer(minLength: 0)
+            Button(editingID == nil ? "创建" : "保存") {
+                saveDraft(editingID: editingID)
+            }
+            .buttonStyle(.islandPill(.prominent))
+            .keyboardShortcut(.defaultAction)
         }
     }
 
     // MARK: - Confirmation and errors
 
+    /// One band across the island, so the page above keeps most of its height: what will run and
+    /// the promise on the left, the command and the buttons on the right.
     private var localConfirm: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: IslandChrome.columnGap) {
             if let pending = engine.pendingLocal {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("在本机运行「\(pending.module.displayName)」？")
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(2)
-                    Text("提示词不会被当成命令。只有下面填好、你确认过的命令才会运行。")
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("在本机运行「\(pending.module.displayName)」？")
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Text("提示词不会被当成命令。只有你填好、确认过的命令才会运行。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Toggle("用默认应用打开拖进来的文件", isOn: $confirmOpenFiles)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .controlSize(.small)
                 }
-                Toggle("用默认应用打开拖进来的文件", isOn: $confirmOpenFiles)
-                    .font(.system(size: 11))
-                    .controlSize(.small)
-                TextField("要运行的 zsh 命令，可以不填", text: $confirmCommand)
-                    .islandField()
-                HStack(spacing: 6) {
-                    Spacer(minLength: 0)
-                    Button("取消") {
-                        engine.cancelPendingLocal()
-                        confirmCommand = ""
-                    }
-                    .buttonStyle(.islandPill(compact: true))
-                    Button("运行") {
-                        do {
-                            try engine.confirmPendingLocal(
-                                openAttachedFiles: confirmOpenFiles,
-                                shellCommand: confirmCommand
-                            )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    TextField("要运行的 zsh 命令，可以不填", text: $confirmCommand)
+                        .islandField()
+                    HStack(spacing: 6) {
+                        Button("取消") {
+                            engine.cancelPendingLocal()
                             confirmCommand = ""
-                        } catch {
-                            engine.reportError(error)
                         }
+                        .buttonStyle(.islandPill(compact: true))
+                        Button("运行") {
+                            do {
+                                try engine.confirmPendingLocal(
+                                    openAttachedFiles: confirmOpenFiles,
+                                    shellCommand: confirmCommand
+                                )
+                                confirmCommand = ""
+                            } catch {
+                                engine.reportError(error)
+                            }
+                        }
+                        .buttonStyle(.islandPill(.prominent, compact: true))
                     }
-                    .buttonStyle(.islandPill(.prominent, compact: true))
                 }
+                .frame(maxWidth: .infinity)
             }
         }
         .islandPlatter(inset: 12, tint: IslandChrome.caution)
@@ -662,9 +688,10 @@ struct ShellView: View {
                 .padding(.top, 1)
             Text(message)
                 .font(.system(size: 11))
-                .lineLimit(3)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .help(message)
             Button {
                 engine.lastError = nil
             } label: {

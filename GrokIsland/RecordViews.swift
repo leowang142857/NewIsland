@@ -80,7 +80,7 @@ struct RunJournalList: View {
         }
     }
 
-    /// The filter makes way for the selection actions, so either set fits the 240 pt column.
+    /// The filter makes way for the selection actions, so either set fits one row on the narrowest island.
     private var toolbar: some View {
         HStack(spacing: 6) {
             if selecting {

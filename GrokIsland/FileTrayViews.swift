@@ -228,8 +228,8 @@ struct FileTrayLayer: View {
         }
     }
 
-    /// Where the drop lands on the first line, and how (move or copy) under it: one line would
-    /// cut the hint off in the 240 pt column.
+    /// Where the drop lands on the first line, and how (move or copy) under it, so a long folder
+    /// name never cuts the hint off.
     private var dropBanner: some View {
         let target = folderTarget ?? crumbTarget
         let internalDrag = tray.isDraggingOut
@@ -643,7 +643,7 @@ private struct TrayCrumb: View {
     let targeted: Bool
     let action: () -> Void
 
-    /// Six characters keeps three crumbs and the toolbar buttons inside the column.
+    /// Six characters keeps three crumbs and the toolbar buttons on one row on the narrowest island.
     private static let maxTitleLength = 6
 
     var body: some View {

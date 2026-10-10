@@ -182,7 +182,8 @@ extension View {
     }
 }
 
-/// Running Cloud Agents and open PRs as two grouped platters; each row opens its page.
+/// Running Cloud Agents and open PRs as two grouped platters side by side, each scrolling on
+/// its own; each row opens its page.
 struct ActivityListView: View {
     @ObservedObject var monitor: CloudActivityMonitor
     let openSettings: () -> Void
@@ -214,21 +215,24 @@ struct ActivityListView: View {
             }
             .padding(.leading, 4)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+                ScrollView {
                     IslandGroup("在跑的 Cloud Agent") {
                         agentRows(snapshot)
                     } accessory: {
                         count(snapshot.agents.count)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
+                ScrollView {
                     IslandGroup("PR") {
                         pullRequestRows(snapshot)
                     } accessory: {
                         count(snapshot.pullRequests.count)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .onAppear { monitor.refreshSoon() }

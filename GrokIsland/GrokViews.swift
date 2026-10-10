@@ -243,12 +243,17 @@ private struct ShortcutButton: View {
 }
 
 /// Full answer for one run, with copy / open-in-Cursor / delete. Answers stay in the journal.
+///
+/// What was asked sits in the left column and the answer beside it, each scrolling on its own.
+/// Without a question the answer has the page to itself, held to a width that still reads easily.
 struct RunDetailView: View {
     let run: RunRecord
     @ObservedObject var engine: IslandEngine
     var onDeleted: () -> Void = {}
 
     @State private var copied = false
+
+    private static let readableWidth: CGFloat = 640
 
     private var state: TaskLightState { TaskLightBoard.state(for: run.phase) }
 
@@ -267,15 +272,29 @@ struct RunDetailView: View {
                 }
             }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let question = run.question {
+            if let question = run.question {
+                HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+                    ScrollView {
                         quote(question)
+                            .textSelection(.enabled)
                     }
-                    answer
+                    .frame(width: IslandChrome.leadingColumnWidth)
+
+                    IslandHairline(axis: .vertical)
+
+                    ScrollView {
+                        answer
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            } else {
+                ScrollView {
+                    answer
+                        .frame(maxWidth: Self.readableWidth, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
             }
         }
     }
@@ -584,6 +603,9 @@ struct IslandShortcutSection: View {
 
 /// Model provider, API key, PR repo, permissions, shortcut buttons, the island background, and
 /// the desktop shortcut, each as one grouped platter.
+///
+/// Three columns scrolling together, so most of the pane shows at once on the short island:
+/// the model; the shortcut buttons with the screen access they need; then the look and the rest.
 struct SettingsPane: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var monitor: CloudActivityMonitor
@@ -603,85 +625,111 @@ struct SettingsPane: View {
                         .islandPlatter(tint: IslandChrome.ember)
                 }
 
-                IslandGroup("模型") {
-                    HStack(spacing: 6) {
-                        Text("服务")
-                            .font(.system(size: 12))
-                        Spacer(minLength: 4)
-                        Picker("模型服务", selection: $settings.providerKind) {
-                            ForEach(ModelProviderKind.allCases) { kind in
-                                Text(kind.settingsTitle).tag(kind)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .controlSize(.small)
-                        .fixedSize()
+                HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+                    column {
+                        modelGroup
                     }
-                    .onChange(of: settings.providerKind) { keyDraft = "" }
-
-                    IslandHairline()
-                    providerKeySection
-                    IslandHairline()
-                    providerModelSection
-
-                    if settings.providerKind == .cursor {
-                        note("问 Grok、快捷按钮和拆分任务都走 Cursor Cloud Agent。Key 只存在这台 Mac 的 Application Support/GrokIsland 里。")
-                    } else {
-                        note("问 Grok、三个快捷按钮和拆分任务都用这个服务。截图会一起发过去；模型看不了图片时会直接告诉你，不会偷偷丢掉。")
-                        note("想看 Cloud Agent，可以在上面选 Cursor（高级）。没有 Cursor 账号就不用管它。")
+                    column {
+                        IslandShortcutSection(settings: settings)
+                        permissionGroup
                     }
-                }
-
-                IslandGroup("PR 仓库") {
-                    TextField(IslandSettingsStorage.defaultPRRepo, text: $settings.prRepo)
-                        .islandField()
-                        .onSubmit { monitor.refreshSoon(minimumAge: 0) }
-                    note("用这台 Mac 上已登录的 origin CLI 读取还开着的 PR。")
-                }
-
-                IslandGroup("权限") {
-                    HStack(spacing: 6) {
-                        Text("屏幕录制")
-                            .font(.system(size: 12))
-                        Spacer(minLength: 4)
-                        Text(screenAccess ? "已开启" : "未开启")
-                            .font(.system(size: 11))
-                            .foregroundStyle(screenAccess ? IslandChrome.positive : IslandChrome.ember)
-                    }
-                    if !screenAccess {
-                        note("快捷按钮要截当前页面。在系统设置里勾选 \(IslandChrome.name)，再重开 app。")
-                        Button("打开系统设置") {
-                            _ = CGRequestScreenCaptureAccess()
-                            NSWorkspace.shared.open(PageCapture.screenRecordingSettingsURL)
-                        }
-                        .buttonStyle(.islandPill(compact: true))
-                    }
-                }
-
-                IslandShortcutSection(settings: settings)
-
-                IslandBackgroundSection(settings: settings)
-
-                IslandGroup("其他") {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("桌面快捷方式")
-                                .font(.system(size: 12))
-                            Text(shortcutNote ?? "在桌面放一个替身，双击就能打开 \(IslandChrome.name)。")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 4)
-                        Button("放到桌面", action: installDesktopShortcut)
-                            .buttonStyle(.islandPill(compact: true))
+                    column {
+                        IslandBackgroundSection(settings: settings)
+                        prRepoGroup
+                        otherGroup
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { screenAccess = PageCapture.hasScreenRecordingAccess }
+    }
+
+    private func column<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            content()
+        }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var modelGroup: some View {
+        IslandGroup("模型") {
+            HStack(spacing: 6) {
+                Text("服务")
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
+                Picker("模型服务", selection: $settings.providerKind) {
+                    ForEach(ModelProviderKind.allCases) { kind in
+                        Text(kind.settingsTitle).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+            }
+            .onChange(of: settings.providerKind) { keyDraft = "" }
+
+            IslandHairline()
+            providerKeySection
+            IslandHairline()
+            providerModelSection
+
+            if settings.providerKind == .cursor {
+                note("问 Grok、快捷按钮和拆分任务都走 Cursor Cloud Agent。Key 只存在这台 Mac 的 Application Support/GrokIsland 里。")
+            } else {
+                note("问 Grok、三个快捷按钮和拆分任务都用这个服务。截图会一起发过去；模型看不了图片时会直接告诉你，不会偷偷丢掉。")
+                note("想看 Cloud Agent，可以在上面选 Cursor（高级）。没有 Cursor 账号就不用管它。")
+            }
+        }
+    }
+
+    private var prRepoGroup: some View {
+        IslandGroup("PR 仓库") {
+            TextField(IslandSettingsStorage.defaultPRRepo, text: $settings.prRepo)
+                .islandField()
+                .onSubmit { monitor.refreshSoon(minimumAge: 0) }
+            note("用这台 Mac 上已登录的 origin CLI 读取还开着的 PR。")
+        }
+    }
+
+    private var permissionGroup: some View {
+        IslandGroup("权限") {
+            HStack(spacing: 6) {
+                Text("屏幕录制")
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
+                Text(screenAccess ? "已开启" : "未开启")
+                    .font(.system(size: 11))
+                    .foregroundStyle(screenAccess ? IslandChrome.positive : IslandChrome.ember)
+            }
+            if !screenAccess {
+                note("快捷按钮要截当前页面。在系统设置里勾选 \(IslandChrome.name)，再重开 app。")
+                Button("打开系统设置") {
+                    _ = CGRequestScreenCaptureAccess()
+                    NSWorkspace.shared.open(PageCapture.screenRecordingSettingsURL)
+                }
+                .buttonStyle(.islandPill(compact: true))
+            }
+        }
+    }
+
+    private var otherGroup: some View {
+        IslandGroup("其他") {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("桌面快捷方式")
+                        .font(.system(size: 12))
+                    Text(shortcutNote ?? "在桌面放一个替身，双击就能打开 \(IslandChrome.name)。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Button("放到桌面", action: installDesktopShortcut)
+                    .buttonStyle(.islandPill(compact: true))
+            }
+        }
     }
 
     private var providerKeySection: some View {
