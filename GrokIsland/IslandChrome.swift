@@ -38,7 +38,6 @@ enum IslandChrome {
     /// Column edge to content. Platter corners nest inside it.
     static let padding: CGFloat = 12
     static let platterRadius: CGFloat = 12
-    static let innerRadius: CGFloat = 9
     static let fieldRadius: CGFloat = 8
     /// Smallest click target for a toolbar glyph.
     static let iconTarget: CGFloat = 26
