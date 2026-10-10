@@ -12,9 +12,13 @@ enum PeekStrip {
     static let maxHeight: CGFloat = 44
     /// Visible strip each side of the notch. Fits lock + three lights, or a `12小时` DDL badge.
     static let wingWidth: CGFloat = 56
-    /// Leftmost slice holding the lock. Hovering it never expands the island, so the lock can be reached.
-    static let lockZoneWidth: CGFloat = 22
-    static let trailingInset: CGFloat = 8
+    /// Concave curve where each wing meets the top of the screen, like the notch's own corners.
+    static let flare: CGFloat = 6
+    /// Leftmost slice, flare included, holding the lock. Hovering it never expands the island,
+    /// so the lock can be reached.
+    static let lockZoneWidth: CGFloat = 24
+    /// From the right-hand flare to the DDL badge.
+    static let trailingInset: CGFloat = 4
     /// Room for the name between the wings when there is no notch.
     static let nameGapWidth: CGFloat = 52
 

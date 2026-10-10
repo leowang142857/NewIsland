@@ -25,6 +25,7 @@ final class PeekStripGeometryTests: XCTestCase {
         let dot: CGFloat = 6 * 1.4
         let threeDots = 3 * dot + 2 * 2
         XCTAssertLessThanOrEqual(PeekStrip.lockZoneWidth + 2 + threeDots, PeekStrip.wingWidth)
+        XCTAssertGreaterThanOrEqual(PeekStrip.lockZoneWidth - PeekStrip.flare, 18, "the lock stays easy to hit past the flare")
         XCTAssertEqual(PeekStrip.lightLimit(count: 0), 3)
         XCTAssertEqual(PeekStrip.lightLimit(count: 3), 3)
         XCTAssertEqual(PeekStrip.lightLimit(count: 7), 2, "two dots plus +N when crowded")

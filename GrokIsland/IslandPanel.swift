@@ -356,18 +356,14 @@ struct PeekStripView: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
 
-    /// Square on top so it meets the screen edge, rounded below like the camera housing.
-    private static let shape = UnevenRoundedRectangle(
-        bottomLeadingRadius: 10,
-        bottomTrailingRadius: 10,
-        style: .continuous
-    )
+    private static let shape = NotchShape(flare: PeekStrip.flare)
 
     var body: some View {
         let emphasized = presence.isDropTargeted && !settings.isPeekLocked
         TimelineView(.periodic(from: .now, by: 5)) { context in
             content(now: context.date)
         }
+        .padding(.horizontal, PeekStrip.flare)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Self.shape.fill(Color.black))
         .clipShape(Self.shape)
@@ -395,7 +391,7 @@ struct PeekStripView: View {
                 TaskLightStrip(lights: lights, limit: PeekStrip.lightLimit(count: lights.count))
                 Spacer(minLength: 0)
             }
-            .frame(width: PeekStrip.wingWidth)
+            .frame(width: PeekStrip.wingWidth - PeekStrip.flare)
 
             Text(IslandChrome.name)
                 .font(.system(size: 10, weight: .semibold))
@@ -411,26 +407,27 @@ struct PeekStripView: View {
                 }
             }
             .padding(.trailing, PeekStrip.trailingInset)
-            .frame(width: PeekStrip.wingWidth)
+            .frame(width: PeekStrip.wingWidth - PeekStrip.flare)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Leftmost control. Its slice of the strip never triggers the hover reveal.
+    /// Leftmost control, the strip's full height. Its slice never triggers the hover reveal.
     private var lockButton: some View {
         let locked = settings.isPeekLocked
         return Button {
             settings.isPeekLocked.toggle()
         } label: {
             Image(systemName: locked ? "lock.fill" : "lock.open")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(locked ? IslandChrome.caution : Color.white.opacity(0.35))
-                .frame(width: PeekStrip.lockZoneWidth, height: PeekStrip.height)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(locked ? IslandChrome.caution : Color.white.opacity(0.4))
+                .frame(width: PeekStrip.lockZoneWidth - PeekStrip.flare)
+                .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(locked ? "已锁定收起：鼠标悬停不会展开。点一下解锁" : "锁定收起：鼠标悬停不再自动展开")
-        .accessibilityLabel(locked ? "解锁，恢复悬停展开" : "锁定收起")
+        .help(locked ? "锁住了，鼠标经过不会展开 · 点一下解锁" : "点一下锁住，鼠标经过就不再展开")
+        .accessibilityLabel(locked ? "解锁岛" : "锁住岛")
     }
 
     private var dropBinding: Binding<Bool> {
