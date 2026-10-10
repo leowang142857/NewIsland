@@ -98,7 +98,7 @@ struct FunctionModule: Identifiable, Codable, Hashable, Sendable {
 
     var displayName: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Untitled module" : trimmed
+        return trimmed.isEmpty ? "未命名模块" : trimmed
     }
 }
 
@@ -164,13 +164,13 @@ enum IslandError: Error, LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .moduleNameEmpty:
-            return "Module name cannot be empty."
+            return "先给模块起个名字。"
         case .emptyInput:
-            return "Enter some text first."
+            return "先写点什么再发。"
         case .moduleNotFound:
-            return "Function module was not found."
+            return "这个模块已经不在了。"
         case .inboxEmpty:
-            return "Drop or select resources before running a module."
+            return "先拖点文件或链接进来，再运行模块。"
         case .dropEmpty:
             return "没读到可用的文件或链接，换一个再拖进来。"
         case .deadlineTitleEmpty:
@@ -178,15 +178,15 @@ enum IslandError: Error, LocalizedError, Equatable {
         case .deadlineNotFound:
             return "这条日程已经不在了。"
         case .runNotFound:
-            return "Run was not found."
+            return "这条记录已经不在了。"
         case .localConfirmationRequired:
-            return "Local executor requires an explicit confirmation."
+            return "在本机运行前，需要你先确认一下。"
         case .cancelled:
-            return "Run was cancelled."
+            return "已经取消了。"
         case .pageCaptureFailed(let message):
             return message
         case .persistenceFailed(let message):
-            return "Could not save modules: \(message)"
+            return "模块没能保存：\(message)"
         case .executorFailed(let message):
             return message
         }

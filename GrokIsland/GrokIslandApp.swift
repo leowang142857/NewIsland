@@ -8,14 +8,16 @@ struct GrokIslandApp: App {
     var body: some Scene {
         Settings {
             VStack(alignment: .leading, spacing: 8) {
-                Text("NewIsland")
+                Text(IslandChrome.name)
                     .font(.title3.weight(.semibold))
-                Text("The island panel is the main UI. This settings pane is a stub.")
+                Text("主界面就是屏幕顶端的岛。把鼠标移到刘海上，它就会展开。")
                     .foregroundStyle(.secondary)
-                Text("Modules, run records, and DDLs are stored in Application Support/GrokIsland/")
-                    .font(.caption)
+                Text("模型、快捷按钮和背景，都在岛右上角的齿轮里改。")
                     .foregroundStyle(.secondary)
-                Button("在桌面创建快捷方式") {
+                Text("模块、运行记录和 DDL 都存在 Application Support/GrokIsland/ 里。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Button("在桌面放一个快捷方式") {
                     _ = try? DesktopShortcut.install()
                 }
             }

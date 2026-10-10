@@ -79,7 +79,7 @@ final class RunJournal: ObservableObject {
             extraPrompt: extraPrompt,
             phase: phase,
             progress: 0,
-            message: phase == .awaitingConfirmation ? "等待本地确认" : "排队中",
+            message: phase == .awaitingConfirmation ? "等你确认后在本机运行" : "排队中",
             resultSummary: nil,
             createdAt: now,
             updatedAt: now,
