@@ -6,8 +6,8 @@ import AppKit
 
 /// Copies the running app into ~/Applications and drops a Finder alias on the Desktop.
 enum DesktopShortcut {
-    static let installedAppName = "grok岛.app"
-    static let aliasName = "grok岛"
+    static let installedAppName = "NewIsland.app"
+    static let aliasName = "NewIsland"
 
     static var applicationsDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser

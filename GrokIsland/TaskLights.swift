@@ -36,10 +36,10 @@ enum TaskLightState: String, Equatable, Sendable {
     var label: String {
         switch self {
         case .queued: "排队中"
-        case .waiting: "等待确认"
+        case .waiting: "等你确认"
         case .running: "运行中"
         case .succeeded: "已完成"
-        case .failed: "失败"
+        case .failed: "没成功"
         case .cancelled: "已取消"
         case .idle: "待合并"
         }

@@ -102,6 +102,27 @@ enum ResourceIntake {
         return collected
     }
 
+    /// Files and folders only, for drops that keep the real files (the staging tray). These
+    /// arrive after the drop has ended; the tray reads the drag pasteboard first and uses this
+    /// only when that came up empty.
+    @MainActor
+    static func loadFileURLs(from providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        #if canImport(UniformTypeIdentifiers)
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            let url: URL? = await withCheckedContinuation { continuation in
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    continuation.resume(returning: TrayInbound.fileURL(from: item))
+                }
+            }
+            if let url {
+                urls.append(url)
+            }
+        }
+        #endif
+        return urls
+    }
+
     @MainActor
     private static func loadItem(from provider: NSItemProvider) async -> ResourceItem? {
         if provider.canLoadObject(ofClass: URL.self) {

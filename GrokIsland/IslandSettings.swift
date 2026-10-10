@@ -353,7 +353,7 @@ final class IslandSettings: ObservableObject {
         storage.pruneBackgroundImages(keeping: name)
     }
 
-    /// Back to the stock aurora; the copied image is deleted.
+    /// Back to the stock ink surface; the copied image is deleted.
     func resetBackground() {
         background = .default
         storage.pruneBackgroundImages(keeping: nil)

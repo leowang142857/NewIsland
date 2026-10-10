@@ -4,13 +4,23 @@ import SwiftUI
 extension DeadlineUrgency {
     var color: Color {
         switch self {
-        case .overdue: IslandChrome.alertRed
+        case .overdue: IslandChrome.danger
         case .critical: IslandChrome.ember
-        case .soon: IslandChrome.amber
-        case .relaxed: IslandChrome.electricGreen
+        case .soon: IslandChrome.caution
+        case .relaxed: IslandChrome.positive
         case .done: Color.secondary
         }
     }
+
+    /// Only overdue and critical deadlines get color; the rest stay grey.
+    var needsAttention: Bool {
+        switch self {
+        case .overdue, .critical: true
+        default: false
+        }
+    }
+
+    var labelColor: Color { needsAttention ? color : Color.secondary }
 }
 
 /// Today 23:59, or tomorrow 23:59 in the last minute of the day.
@@ -24,9 +34,9 @@ private func defaultDeadlineDue(now: Date = Date()) -> Date {
 extension EnergyLoad {
     var color: Color {
         switch self {
-        case .calm: IslandChrome.electricGreen
+        case .calm: IslandChrome.positive
         case .busy: IslandChrome.ember
-        case .overloaded: IslandChrome.alertRed
+        case .overloaded: IslandChrome.danger
         }
     }
 }
@@ -45,21 +55,14 @@ struct TaskEnergyBar: View {
         let color = load.color
         Group {
             if items.isEmpty {
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(Color.white.opacity(0.1))
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
             } else {
                 HStack(spacing: gap) {
                     ForEach(items) { item in
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(color)
+                        Capsule()
+                            .fill(highlightedID == item.id ? Color.white.opacity(0.9) : color.opacity(0.85))
                             .frame(maxWidth: .infinity)
-                            .overlay {
-                                if highlightedID == item.id {
-                                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                                        .strokeBorder(Color.white.opacity(0.9), lineWidth: 1)
-                                }
-                            }
-                            .shadow(color: color.opacity(0.7), radius: 2)
                             .help("\(item.title) · \(DeadlineFormat.countdown(item.remaining(now: now)))")
                     }
                 }
@@ -69,25 +72,26 @@ struct TaskEnergyBar: View {
     }
 }
 
-/// Small `⚡︎5小时` badge for the collapsed peek strip.
+/// Small `• 5小时` badge for the collapsed peek strip.
 struct DeadlineBadge: View {
     let item: DeadlineItem
     let now: Date
 
     var body: some View {
         let urgency = item.urgency(now: now)
-        HStack(spacing: 2) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 8, weight: .bold))
+        HStack(spacing: 4) {
+            Circle()
+                .fill(urgency.color)
+                .frame(width: 5, height: 5)
             Text(DeadlineFormat.short(item.remaining(now: now)))
-                .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.85))
         }
-        .foregroundStyle(urgency.color)
         .help("DDL：\(item.title) · \(DeadlineFormat.countdown(item.remaining(now: now)))")
     }
 }
 
-/// One DDL energy strip above the function strips. Each task is one cell in that bar.
+/// One DDL energy strip above the Grok shortcuts. Each task is one cell in that bar.
 /// Hovering (or typing into it) expands the list and the add / edit field.
 ///
 /// The time control is the last row. A click or drag that slips a few points below
@@ -107,7 +111,8 @@ struct DeadlineEnergyBar: View {
     @State private var parsedHint: String?
     @FocusState private var fieldFocused: Bool
 
-    private static let visibleRows = 4
+    /// Three rows, the composer, and 清掉已完成 still fit the wide island's left column.
+    private static let visibleRows = 3
 
     private var expanded: Bool {
         DeadlineTimeHit.staysOpen(
@@ -141,79 +146,68 @@ struct DeadlineEnergyBar: View {
 
     private func card(now: Date) -> some View {
         let summary = store.summary(now: now)
-        let accent = summary.pendingCount == 0
-            ? IslandChrome.neonCyan
-            : EnergyLoad.level(for: summary.pendingCount).color
-        return VStack(alignment: .leading, spacing: 6) {
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
+        return VStack(alignment: .leading, spacing: 8) {
             summaryRow(summary, now: now)
             if expanded {
                 expandedContent(now: now)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.black.opacity(expanded ? 0.32 : 0.2))
+            shape.fill(expanded ? IslandChrome.surfaceRaised : IslandChrome.surface)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(accent.opacity(expanded ? 0.75 : 0.4), lineWidth: 1)
-                .shadow(color: accent.opacity(expanded ? 0.5 : 0.2), radius: 3)
+            shape
+                .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
+                .allowsHitTesting(false)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(shape)
     }
 
     private func summaryRow(_ summary: DeadlineSummary, now: Date) -> some View {
-        let load = EnergyLoad.level(for: summary.pendingCount)
-        return HStack(spacing: 6) {
-            Image(systemName: summary.next == nil ? "bolt" : "bolt.fill")
-                .font(.caption)
-                .foregroundStyle(summary.next == nil ? Color.secondary : load.color)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Text("DDL")
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(IslandChrome.neonCyan)
-                    if let next = summary.next {
-                        Text(next.title)
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(DeadlineFormat.countdown(next.remaining(now: now)))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(load.color)
-                            .lineLimit(1)
-                    } else {
-                        Text("还没有任务 · 悬停添加")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("DDL")
+                    .islandSectionLabel()
+                if let next = summary.next {
+                    Text(next.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(DeadlineFormat.countdown(next.remaining(now: now)))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(next.urgency(now: now).labelColor)
+                        .lineLimit(1)
+                    if summary.pendingCount > 1 {
+                        Text("共 \(summary.pendingCount)")
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .help("还有 \(summary.pendingCount) 条没做完 · 7 天内 \(summary.withinWeekCount) 条 · 已经过了 \(summary.overdueCount) 条")
                     }
+                } else {
+                    Text("还没有 DDL · 移过来加一条")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
                 }
-                TaskEnergyBar(items: store.pending, now: now, highlightedID: editingID)
-                    .frame(height: 6)
             }
-            if summary.pendingCount > 1 {
-                Text("\(summary.pendingCount)")
-                    .font(.caption2.weight(.bold).monospacedDigit())
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.white.opacity(0.12)))
-                    .help("共 \(summary.pendingCount) 条未完成 · 7 天内 \(summary.withinWeekCount) 条 · 超时 \(summary.overdueCount) 条")
-            }
+            TaskEnergyBar(items: store.pending, now: now, highlightedID: editingID)
+                .frame(height: 3)
         }
     }
 
     @ViewBuilder
     private func expandedContent(now: Date) -> some View {
         let pending = store.pending
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             if pending.isEmpty {
-                Text("还没有 DDL。输入「周五 18:00 交实验报告」试试。")
-                    .font(.caption2)
+                Text("像「周五 18:00 交实验报告」这样写就行，时间会自动填好。")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(pending.prefix(Self.visibleRows)) { item in
                     DeadlineRow(
@@ -226,30 +220,33 @@ struct DeadlineEnergyBar: View {
                     )
                 }
                 if pending.count > Self.visibleRows {
-                    Text("另有 \(pending.count - Self.visibleRows) 条稍后的 DDL")
-                        .font(.caption2)
+                    Text("还有 \(pending.count - Self.visibleRows) 条在后面")
+                        .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
+                        .padding(.leading, 4)
                 }
             }
             composer
             if store.items.contains(where: \.isDone) {
-                Button("清除已完成的 DDL") { _ = store.clearDone() }
-                    .buttonStyle(.borderless)
-                    .font(.caption2)
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("清掉已完成") { _ = store.clearDone() }
+                        .buttonStyle(.islandPill(.quiet, compact: true))
+                }
+                .padding(.top, 2)
             }
         }
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                TextField(editingID == nil ? "添加日程：周五 18:00 交实验报告" : "修改内容", text: $draft)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                TextField(editingID == nil ? "周五 18:00 交实验报告" : "改成什么", text: $draft)
                     .focused($fieldFocused)
                     .onSubmit(commit)
+                    .islandField()
                 Button(editingID == nil ? "添加" : "保存", action: commit)
-                    .controlSize(.small)
+                    .buttonStyle(.islandPill(.prominent, compact: true))
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             HStack(spacing: 4) {
@@ -266,20 +263,20 @@ struct DeadlineEnergyBar: View {
                         .allowsHitTesting(false)
                     )
                 if let parsedHint {
-                    Text("识别：\(parsedHint)")
-                        .font(.caption2)
-                        .foregroundStyle(IslandChrome.neonCyan)
+                    Text(parsedHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .help("从你写的字里认出来的时间")
                 }
                 Spacer(minLength: 0)
                 if editingID != nil || !draft.isEmpty {
                     Button("取消", action: resetDraft)
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
+                        .buttonStyle(.islandPill(.quiet, compact: true))
                 }
             }
         }
-        .padding(.top, 2)
+        .padding(.top, 4)
     }
 
     // MARK: - Actions
@@ -341,43 +338,50 @@ private struct DeadlineRow: View {
     let onDone: () -> Void
     let onDelete: () -> Void
 
+    @State private var hovering = false
+
     var body: some View {
         let urgency = item.urgency(now: now)
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Button(action: onDone) {
-                Image(systemName: "circle")
-                    .font(.caption)
-                    .foregroundStyle(urgency.color)
+                Circle()
+                    .strokeBorder(urgency.needsAttention ? urgency.color : Color.white.opacity(0.35), lineWidth: 1.2)
+                    .frame(width: 12, height: 12)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
-            .help("标记完成")
+            .buttonStyle(.islandPress)
+            .help("做完了就点一下")
 
             HStack(spacing: 4) {
                 Text(item.title)
-                    .font(.caption)
+                    .font(.system(size: 12))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 Text(DeadlineFormat.dueLabel(item.due, now: now))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(urgency == .overdue ? urgency.color : Color.secondary)
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(urgency.labelColor)
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onEdit)
-            .help("\(DeadlineFormat.countdown(item.remaining(now: now))) · 点击修改")
+            .help("\(DeadlineFormat.countdown(item.remaining(now: now))) · 点一下修改")
 
             Button(action: onDelete) {
                 Image(systemName: "xmark")
-                    .font(.caption2)
+                    .font(.system(size: 9, weight: .bold))
             }
-            .buttonStyle(.borderless)
-            .help("删除这条 DDL")
+            .buttonStyle(IslandIconButtonStyle(size: 18))
+            .opacity(hovering || isEditing ? 1 : 0)
+            .help("删掉这条 DDL")
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 3)
         .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isEditing ? IslandChrome.neonCyan.opacity(0.14) : Color.white.opacity(0.03))
+            RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous)
+                .fill(isEditing ? IslandChrome.surfaceRaised : (hovering ? IslandChrome.surface : Color.clear))
         }
+        .animation(IslandChrome.hoverFade, value: hovering)
+        .onHover { hovering = $0 }
     }
 }
 

@@ -10,6 +10,8 @@ struct GrokQuickBar: View {
     @State private var question = ""
     @State private var splitDraft = ""
     @State private var capturing = false
+    /// Which shortcut tile is taking the screenshot; nil while the question field is.
+    @State private var capturingShortcut: Int?
     @State private var splitting = false
     @State private var splitTargeted = false
     @State private var note: String?
@@ -19,112 +21,116 @@ struct GrokQuickBar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Fixed vertically so a two-line custom title grows all three tiles together.
+            HStack(spacing: 6) {
                 ForEach(shortcuts.indices, id: \.self) { index in
-                    shortcutButton(shortcuts[index])
-                }
-            }
-
-            HStack(spacing: 4) {
-                TextField("问 Grok（附当前页截图）", text: $question)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-                    .onSubmit { fireAsk() }
-                if capturing {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Button {
-                        fireAsk()
-                    } label: {
-                        Image(systemName: "paperplane.fill")
+                    ShortcutButton(
+                        shortcut: shortcuts[index],
+                        busy: capturing && capturingShortcut == index,
+                        disabled: capturing
+                    ) {
+                        fire(shortcuts[index], at: index)
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
 
-            splitRow
+            VStack(alignment: .leading, spacing: 6) {
+                inputRow(
+                    "问问 Grok · 会带上当前页面",
+                    text: $question,
+                    busy: capturing && capturingShortcut == nil,
+                    symbol: "arrow.up",
+                    help: "发送",
+                    submit: fireAsk
+                )
+
+                inputRow(
+                    "大任务拆开做 · 也能拖文件进来",
+                    text: $splitDraft,
+                    busy: splitting,
+                    symbol: "arrow.triangle.branch",
+                    help: "拆成 2–4 个子任务一起做，做完汇总成一条",
+                    highlighted: splitTargeted,
+                    submit: { fireSplit() }
+                )
+                .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
+                    fireSplitDrop(providers)
+                    return true
+                }
+            }
 
             if splitTargeted {
-                Text("松手后拆成 2–4 个子任务，并行执行后再汇总")
-                    .font(.caption2)
-                    .foregroundStyle(IslandChrome.neonCyan)
+                caption("松手就拆成 2–4 个子任务，各自做完再汇总", color: .secondary)
             }
 
             if let note {
-                Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .lineLimit(3)
+                caption(note, color: IslandChrome.ember)
             }
         }
     }
 
-    private func shortcutButton(_ shortcut: ResolvedIslandShortcut) -> some View {
-        Button {
-            fire(shortcut)
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: shortcut.symbolName)
-                    .font(.caption)
-                Text(shortcut.title)
-                    .font(.caption2.weight(.medium))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(IslandChrome.neonCyan.opacity(0.08))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(IslandChrome.neonCyan.opacity(0.35), lineWidth: 1)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(capturing || !shortcut.isReady)
-        .help("截当前最前面的页面，交给 Grok \(shortcut.title)")
+    /// Lines up with the text inside the capsule fields.
+    private func caption(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(color)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
     }
 
-    private var splitRow: some View {
-        HStack(spacing: 4) {
-            TextField("拆分任务（输入或拖入一个大任务）", text: $splitDraft)
-                .textFieldStyle(.roundedBorder)
-                .font(.caption)
-                .onSubmit { fireSplit() }
-            if splitting {
-                ProgressView().controlSize(.mini)
-            } else {
-                Button {
-                    fireSplit()
-                } label: {
-                    Image(systemName: "arrow.triangle.branch")
+    /// Spotlight-like capsule with its action tucked inside the trailing end. The 22 pt button
+    /// sits 4 pt in from the 30 pt capsule, so the two curves stay concentric.
+    private func inputRow(
+        _ placeholder: String,
+        text: Binding<String>,
+        busy: Bool,
+        symbol: String,
+        help: String,
+        highlighted: Bool = false,
+        submit: @escaping () -> Void
+    ) -> some View {
+        let empty = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return TextField(placeholder, text: text)
+            .onSubmit(submit)
+            .padding(.trailing, 20)
+            .islandCapsuleField(highlighted: highlighted)
+            .overlay(alignment: .trailing) {
+                Group {
+                    if busy {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 22, height: 22)
+                    } else {
+                        Button(action: submit) {
+                            Image(systemName: symbol)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(empty ? Color.white.opacity(0.32) : IslandChrome.ink)
+                                .frame(width: 22, height: 22)
+                                .background(Circle().fill(empty ? Color.clear : Color.white.opacity(0.9)))
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.islandPress)
+                        .disabled(empty)
+                        .help(help)
+                    }
                 }
-                .buttonStyle(.borderless)
-                .disabled(splitDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("拆成 2–4 个子任务并行执行，完成后汇总成一条结果")
+                .padding(.trailing, 4)
+                .animation(IslandChrome.hoverFade, value: empty)
             }
-        }
-        .padding(2)
-        .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(IslandChrome.neonCyan.opacity(splitTargeted ? 0.9 : 0), lineWidth: 1)
-        }
-        .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
-            fireSplitDrop(providers)
-            return true
-        }
     }
 
-    private func fire(_ shortcut: ResolvedIslandShortcut) {
+    private func fire(_ shortcut: ResolvedIslandShortcut, at index: Int) {
         guard !capturing, shortcut.isReady else { return }
         capturing = true
+        capturingShortcut = index
         note = nil
         Task { @MainActor in
             let page = await PageCapture.snapshot()
             capturing = false
+            capturingShortcut = nil
             note = page.captureNote
             do {
                 let record = try engine.runShortcut(title: shortcut.title, prompt: shortcut.prompt, page: page)
@@ -138,6 +144,7 @@ struct GrokQuickBar: View {
     private func fireAsk() {
         guard !capturing else { return }
         capturing = true
+        capturingShortcut = nil
         note = nil
         let asked = question
         Task { @MainActor in
@@ -180,7 +187,65 @@ struct GrokQuickBar: View {
     }
 }
 
+/// A Control Center–style tile: the glyph over a short label. The tapped tile shows the
+/// spinner while the page is captured.
+private struct ShortcutButton: View {
+    let shortcut: ResolvedIslandShortcut
+    var busy = false
+    let disabled: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    private var lit: Bool { hovering && !disabled && shortcut.isReady }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Group {
+                    if busy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: shortcut.symbolName)
+                            .font(.system(size: 15))
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                }
+                .frame(height: 18)
+                Text(shortcut.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 54, maxHeight: .infinity)
+            .background(shape.fill(lit ? IslandChrome.surfaceRaised : IslandChrome.surface))
+            .overlay {
+                shape
+                    .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(shape)
+        }
+        .buttonStyle(.islandPress)
+        .onHover { hovering = $0 }
+        .animation(IslandChrome.hoverFade, value: hovering)
+        .disabled(disabled || !shortcut.isReady)
+        .opacity(shortcut.isReady ? 1 : 0.45)
+        .help(shortcut.isReady
+            ? "把最前面的页面截下来，交给 Grok：\(shortcut.title)"
+            : "这个按钮还没写要做什么 · 到设置里补上")
+    }
+}
+
 /// Full answer for one run, with copy / open-in-Cursor / delete. Answers stay in the journal.
+///
+/// What was asked sits in the left column and the answer beside it, each scrolling on its own.
+/// Without a question the answer has the page to itself, held to a width that still reads easily.
 struct RunDetailView: View {
     let run: RunRecord
     @ObservedObject var engine: IslandEngine
@@ -188,31 +253,78 @@ struct RunDetailView: View {
 
     @State private var copied = false
 
+    private static let readableWidth: CGFloat = 640
+
+    private var state: TaskLightState { TaskLightBoard.state(for: run.phase) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                TaskLightDot(state: TaskLightBoard.state(for: run.phase), size: 6)
-                Text(phaseTitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(run.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                Spacer()
+        VStack(alignment: .leading, spacing: 10) {
+            header
+
+            if run.isActive {
+                VStack(alignment: .leading, spacing: 5) {
+                    ProgressView(value: run.progress)
+                        .controlSize(.small)
+                    Text(run.message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            if let question = run.question {
+                HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+                    ScrollView {
+                        quote(question)
+                            .textSelection(.enabled)
+                    }
+                    .frame(width: IslandChrome.leadingColumnWidth)
+
+                    IslandHairline(axis: .vertical)
+
+                    ScrollView {
+                        answer
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+            } else {
+                ScrollView {
+                    answer
+                        .frame(maxWidth: Self.readableWidth, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            TaskLightDot(state: state, size: 6)
+            Text(state.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(Self.stamp(run.createdAt))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            HStack(spacing: 2) {
                 if run.isActive {
                     Button("取消") { engine.cancelRun(id: run.id) }
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
+                        .buttonStyle(.islandPill(compact: true))
+                        .padding(.trailing, 4)
                 }
                 if let answer = run.resultSummary, !run.isActive {
-                    Button(copied ? "已拷贝" : "拷贝") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(answer, forType: .string)
-                        copied = true
+                    Button {
+                        copy(answer)
+                    } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     }
-                    .buttonStyle(.borderless)
-                    .font(.caption2)
+                    .buttonStyle(.islandIcon(tint: copied ? IslandChrome.positive : nil))
+                    .help(copied ? "拷好了" : "拷贝回答")
                 }
                 if let link = run.link, let url = URL(string: link) {
                     Button {
@@ -220,8 +332,8 @@ struct RunDetailView: View {
                     } label: {
                         Image(systemName: "arrow.up.right.square")
                     }
-                    .buttonStyle(.borderless)
-                    .help("在 Cursor 打开这个 Cloud Agent，可继续追问")
+                    .buttonStyle(.islandIcon())
+                    .help("在 Cursor 里打开这个 Cloud Agent，可以接着问")
                 }
                 Button {
                     engine.deleteRuns(ids: [run.id])
@@ -229,65 +341,62 @@ struct RunDetailView: View {
                 } label: {
                     Image(systemName: "trash")
                 }
-                .buttonStyle(.borderless)
-                .help(run.isActive ? "取消并删除这条记录" : "删除这条记录")
+                .buttonStyle(.islandIcon())
+                .help(run.isActive ? "取消并删掉这条记录" : "删掉这条记录")
             }
+        }
+        .frame(minHeight: IslandChrome.iconTarget)
+    }
 
-            if let question = run.question {
-                HStack(alignment: .top, spacing: 5) {
-                    Text("问")
-                        .font(.caption2.weight(.heavy))
-                        .foregroundStyle(IslandChrome.neonCyan)
-                    Text(question)
-                        .font(.caption)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(6)
-                .background {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(IslandChrome.neonCyan.opacity(0.08))
-                }
+    /// What was asked, set off by a thin bar the way Mail quotes a reply.
+    private func quote(_ question: String) -> some View {
+        Text(question)
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 10)
+            .overlay(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 2)
             }
+    }
 
-            if run.isActive {
-                ProgressView(value: run.progress)
-                Text(run.message)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            ScrollView {
-                Group {
-                    if let answer = run.resultSummary, !run.isActive {
-                        MarkdownLite(text: answer)
-                    } else if run.isActive {
-                        Text(run.origin == .splitTask
-                            ? "正在把任务拆开并行执行。每个子任务有自己的任务灯，全部结束后汇总显示在这里。"
-                            : "答完后结果会显示在这里。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(run.phase == .cancelled ? "已取消，没有结果。" : run.message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-            }
+    @ViewBuilder
+    private var answer: some View {
+        if let answer = run.resultSummary, !run.isActive {
+            MarkdownLite(text: answer)
+        } else if run.isActive {
+            Text(run.origin == .splitTask
+                ? "正在拆开同时做。每个子任务都有自己的灯，全做完会汇总到这里。"
+                : "答好了就显示在这里。")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        } else {
+            Text(run.phase == .cancelled ? "取消了，这次没有结果。" : run.message)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 
-    private var phaseTitle: String {
-        switch run.phase {
-        case .queued: "排队中"
-        case .awaitingConfirmation: "等待确认"
-        case .running: "运行中"
-        case .succeeded: "已完成"
-        case .failed: "失败"
-        case .cancelled: "已取消"
+    private func copy(_ answer: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(answer, forType: .string)
+        copied = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            copied = false
         }
+    }
+
+    /// Just the time for today, with the date before that, so a run's header or journal row
+    /// stays on one line.
+    static func stamp(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 }
 
@@ -302,24 +411,24 @@ struct MarkdownLite: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 7) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let line):
                     inline(line)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(IslandChrome.neonCyan)
-                        .padding(.top, 2)
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.top, 5)
                 case .paragraph(let line):
                     inline(line)
-                        .font(.caption)
+                        .font(.system(size: 12))
+                        .lineSpacing(3)
                 case .code(let code):
                     Text(code)
-                        .font(.system(size: 10, design: .monospaced))
-                        .padding(5)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .background(IslandChrome.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous))
                 }
             }
         }
@@ -374,36 +483,30 @@ struct IslandShortcutSection: View {
     private static let customChoice = "custom"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("快捷按钮")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                if settings.shortcutButtons != .default {
-                    Button("重置") { settings.shortcutButtons = .default }
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
-                        .help("三个按钮回到整理错题、解答题目、检查代码。")
-                }
-            }
-
+        IslandGroup("快捷按钮") {
             ForEach(0..<IslandShortcutButtons.count, id: \.self) { index in
+                if index > 0 { IslandHairline() }
                 slotEditor(index)
             }
-
-            Text("点按钮仍会截当前最前面的页面交给 Grok。没改过就还是整理错题、解答题目、检查代码。")
-                .font(.caption2)
+            Text("点一下就截下最前面的页面，交给 Grok。")
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        } accessory: {
+            if settings.shortcutButtons != .default {
+                Button("恢复默认") { settings.shortcutButtons = .default }
+                    .buttonStyle(.islandPill(.quiet, compact: true))
+                    .help("三个按钮回到整理错题、解答题目、检查代码。")
+            }
         }
     }
 
     private func slotEditor(_ index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text("按钮 \(index + 1)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
                 Picker("", selection: choiceBinding(index)) {
                     ForEach(GrokQuickAction.buttons) { action in
                         Text(action.title).tag(action.rawValue)
@@ -413,21 +516,20 @@ struct IslandShortcutSection: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .controlSize(.small)
-                Spacer(minLength: 0)
+                .fixedSize()
             }
 
             if isCustom(index) {
-                TextField("按钮名称", text: stringBinding(index, \.customTitle))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-                TextField("交给 Grok 的提示词", text: stringBinding(index, \.customPrompt), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+                TextField("按钮上的字", text: stringBinding(index, \.customTitle))
+                    .islandField()
+                TextField("想让 Grok 做什么", text: stringBinding(index, \.customPrompt), axis: .vertical)
                     .lineLimit(2...4)
+                    .islandField()
                 HStack(spacing: 6) {
                     Text("图标")
-                        .font(.caption2)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
                     Picker("", selection: stringBinding(index, \.customSymbol)) {
                         ForEach(IslandShortcutSlot.symbolAllowlist, id: \.self) { symbol in
                             Image(systemName: symbol).tag(symbol)
@@ -436,7 +538,7 @@ struct IslandShortcutSection: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .controlSize(.small)
-                    Spacer(minLength: 0)
+                    .fixedSize()
                 }
             }
         }
@@ -499,7 +601,11 @@ struct IslandShortcutSection: View {
     }
 }
 
-/// Model provider, API key, PR repo, permissions, shortcut buttons, and the island background.
+/// Model provider, API key, PR repo, permissions, shortcut buttons, the island background, and
+/// the desktop shortcut, each as one grouped platter.
+///
+/// Three columns scrolling together, so most of the pane shows at once on the short island:
+/// the model; the shortcut buttons with the screen access they need; then the look and the rest.
 struct SettingsPane: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var monitor: CloudActivityMonitor
@@ -507,155 +613,192 @@ struct SettingsPane: View {
 
     @State private var keyDraft = ""
     @State private var screenAccess = PageCapture.hasScreenRecordingAccess
+    @State private var shortcutNote: String?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 14) {
                 if !settings.isModelReady {
-                    note(ModelProviderMessages.settingsHint)
+                    Text(ModelProviderMessages.settingsHint)
+                        .font(.system(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .islandPlatter(tint: IslandChrome.ember)
                 }
 
-                HStack {
-                    Text("模型服务")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    Picker("模型服务", selection: $settings.providerKind) {
-                        ForEach(ModelProviderKind.allCases) { kind in
-                            Text(kind.settingsTitle).tag(kind)
-                        }
+                HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+                    column {
+                        modelGroup
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .font(.caption)
-                }
-                .onChange(of: settings.providerKind) { keyDraft = "" }
-
-                providerKeySection
-                providerModelSection
-
-                if settings.providerKind == .cursor {
-                    note("问 Grok、快捷按钮和拆分任务走 Cursor Cloud Agent。Key 只存在本机 Application Support/GrokIsland。")
-                } else {
-                    note("问 Grok、三个快捷按钮和拆分任务都走这里。截图会一并送出；模型若不支持图片，会明确失败，不会悄悄丢掉。")
-                    note("Cursor（高级）仍可在上面的菜单里选，用来看 Cloud Agent。没有 Cursor 账号可以不用。")
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PR 仓库")
-                        .font(.caption.weight(.semibold))
-                    TextField(IslandSettingsStorage.defaultPRRepo, text: $settings.prRepo)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                        .onSubmit { monitor.refreshSoon(minimumAge: 0) }
-                    note("通过本机已登录的 origin CLI 读取开着的 PR。")
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text("屏幕录制权限")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Text(screenAccess ? "已开启" : "未开启")
-                            .font(.caption2)
-                            .foregroundStyle(screenAccess ? IslandChrome.electricGreen : .orange)
+                    column {
+                        IslandShortcutSection(settings: settings)
+                        permissionGroup
                     }
-                    if !screenAccess {
-                        Button("打开系统设置") {
-                            _ = CGRequestScreenCaptureAccess()
-                            NSWorkspace.shared.open(PageCapture.screenRecordingSettingsURL)
-                        }
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
-                        note("快捷按钮要截当前页面。勾选 grok岛 后重开 app。")
+                    column {
+                        IslandBackgroundSection(settings: settings)
+                        prRepoGroup
+                        otherGroup
                     }
                 }
-
-                Rectangle()
-                    .fill(IslandChrome.layerRule)
-                    .frame(height: 1)
-
-                IslandShortcutSection(settings: settings)
-
-                Rectangle()
-                    .fill(IslandChrome.layerRule)
-                    .frame(height: 1)
-
-                IslandBackgroundSection(settings: settings)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { screenAccess = PageCapture.hasScreenRecordingAccess }
     }
 
+    private func column<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            content()
+        }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var modelGroup: some View {
+        IslandGroup("模型") {
+            HStack(spacing: 6) {
+                Text("服务")
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
+                Picker("模型服务", selection: $settings.providerKind) {
+                    ForEach(ModelProviderKind.allCases) { kind in
+                        Text(kind.settingsTitle).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+            }
+            .onChange(of: settings.providerKind) { keyDraft = "" }
+
+            IslandHairline()
+            providerKeySection
+            IslandHairline()
+            providerModelSection
+
+            if settings.providerKind == .cursor {
+                note("问 Grok、快捷按钮和拆分任务都走 Cursor Cloud Agent。Key 只存在这台 Mac 的 Application Support/GrokIsland 里。")
+            } else {
+                note("问 Grok、三个快捷按钮和拆分任务都用这个服务。截图会一起发过去；模型看不了图片时会直接告诉你，不会偷偷丢掉。")
+                note("想看 Cloud Agent，可以在上面选 Cursor（高级）。没有 Cursor 账号就不用管它。")
+            }
+        }
+    }
+
+    private var prRepoGroup: some View {
+        IslandGroup("PR 仓库") {
+            TextField(IslandSettingsStorage.defaultPRRepo, text: $settings.prRepo)
+                .islandField()
+                .onSubmit { monitor.refreshSoon(minimumAge: 0) }
+            note("用这台 Mac 上已登录的 origin CLI 读取还开着的 PR。")
+        }
+    }
+
+    private var permissionGroup: some View {
+        IslandGroup("权限") {
+            HStack(spacing: 6) {
+                Text("屏幕录制")
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
+                Text(screenAccess ? "已开启" : "未开启")
+                    .font(.system(size: 11))
+                    .foregroundStyle(screenAccess ? IslandChrome.positive : IslandChrome.ember)
+            }
+            if !screenAccess {
+                note("快捷按钮要截当前页面。在系统设置里勾选 \(IslandChrome.name)，再重开 app。")
+                Button("打开系统设置") {
+                    _ = CGRequestScreenCaptureAccess()
+                    NSWorkspace.shared.open(PageCapture.screenRecordingSettingsURL)
+                }
+                .buttonStyle(.islandPill(compact: true))
+            }
+        }
+    }
+
+    private var otherGroup: some View {
+        IslandGroup("其他") {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("桌面快捷方式")
+                        .font(.system(size: 12))
+                    Text(shortcutNote ?? "在桌面放一个替身，双击就能打开 \(IslandChrome.name)。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Button("放到桌面", action: installDesktopShortcut)
+                    .buttonStyle(.islandPill(compact: true))
+            }
+        }
+    }
+
     private var providerKeySection: some View {
         let kind = settings.providerKind
         let saved = settings.hasSelectedAPIKey
-        let optional = kind == .ollama
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack {
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Text(kind.keySectionTitle)
-                    .font(.caption.weight(.semibold))
-                Spacer()
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
                 Text(keyStatusText)
-                    .font(.caption2)
+                    .font(.system(size: 11))
                     .foregroundStyle(keyStatusColor)
             }
-            HStack(spacing: 4) {
-                SecureField(saved ? "输入新 key 替换" : kind.keyPlaceholder, text: $keyDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+            HStack(spacing: 6) {
+                SecureField(saved ? "输入新的 key 来替换" : kind.keyPlaceholder, text: $keyDraft)
+                    .islandField()
                     .onSubmit(saveKey)
                 Button("保存", action: saveKey)
-                    .controlSize(.small)
+                    .buttonStyle(.islandPill(.prominent, compact: true))
                     .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            HStack {
-                if let url = kind.docsURL {
-                    Button(kind.docsLinkTitle) { NSWorkspace.shared.open(url) }
-                        .buttonStyle(.borderless)
-                }
-                if saved {
-                    Button("清除", role: .destructive) {
-                        do { try settings.clearProviderKey() } catch { engine.reportError(error) }
-                        monitor.refreshSoon(minimumAge: 0)
+            if kind.docsURL != nil || saved {
+                HStack(spacing: 4) {
+                    if let url = kind.docsURL {
+                        Button(kind.docsLinkTitle) { NSWorkspace.shared.open(url) }
+                            .buttonStyle(.islandPill(.quiet, compact: true))
                     }
-                    .buttonStyle(.borderless)
+                    Spacer(minLength: 0)
+                    if saved {
+                        Button("清除") {
+                            do { try settings.clearProviderKey() } catch { engine.reportError(error) }
+                            monitor.refreshSoon(minimumAge: 0)
+                        }
+                        .buttonStyle(.islandPill(.destructive, compact: true))
+                    }
                 }
             }
-            .font(.caption2)
-            if optional {
-                note("本地 Ollama 通常不需要 key。先在本机跑起来，再填写下面的模型名。")
+            if kind == .ollama {
+                note("本地 Ollama 一般不用 key。先在这台 Mac 上跑起来，再填下面的模型名。")
             }
         }
     }
 
     private var keyStatusText: String {
         if settings.providerKind == .ollama {
-            return settings.hasSelectedAPIKey ? "已保存" : "可不填"
+            return settings.hasSelectedAPIKey ? "已保存" : "可以不填"
         }
-        return settings.hasSelectedAPIKey ? "已保存" : "未设置"
+        return settings.hasSelectedAPIKey ? "已保存" : "还没填"
     }
 
     private var keyStatusColor: Color {
-        if settings.hasSelectedAPIKey { return IslandChrome.electricGreen }
+        if settings.hasSelectedAPIKey { return IslandChrome.positive }
         if settings.providerKind == .ollama { return Color.secondary }
-        return Color.orange
+        return IslandChrome.ember
     }
 
     private var providerModelSection: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 6) {
             if settings.providerKind.allowsCustomBaseURL {
                 Text(settings.providerKind == .ollama ? "Ollama 地址" : "接口地址")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 12))
                 TextField(settings.providerKind.defaultBaseURL, text: $settings.endpointBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+                    .islandField()
             }
             Text(settings.providerKind == .cursor ? "Grok 模型 ID" : "模型")
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12))
             TextField(settings.providerKind.modelPlaceholder, text: modelBinding)
-                .textFieldStyle(.roundedBorder)
-                .font(.caption)
+                .islandField()
         }
     }
 
@@ -668,7 +811,7 @@ struct SettingsPane: View {
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.caption2)
+            .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -681,6 +824,16 @@ struct SettingsPane: View {
             keyDraft = ""
             monitor.refreshSoon(minimumAge: 0)
         } catch {
+            engine.reportError(error)
+        }
+    }
+
+    private func installDesktopShortcut() {
+        do {
+            _ = try DesktopShortcut.install()
+            shortcutNote = "已经放到桌面：\(DesktopShortcut.aliasName)"
+        } catch {
+            shortcutNote = error.localizedDescription
             engine.reportError(error)
         }
     }

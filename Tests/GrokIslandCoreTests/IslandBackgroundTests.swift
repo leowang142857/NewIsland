@@ -44,9 +44,9 @@ final class IslandRGBTests: XCTestCase {
 }
 
 final class IslandBackgroundStyleTests: XCTestCase {
-    func testDefaultIsAuroraWithoutVeilFloor() {
+    func testDefaultIsStandardWithoutVeilFloor() {
         let style = IslandBackgroundStyle.default
-        XCTAssertEqual(style.kind, .aurora)
+        XCTAssertEqual(style.kind, .standard)
         XCTAssertFalse(style.usesCustomFill)
         XCTAssertEqual(style.minimumDim, 0)
     }
@@ -118,7 +118,7 @@ final class IslandBackgroundStyleTests: XCTestCase {
         XCTAssertEqual(clean.dim, IslandBackgroundStyle.dimRange.upperBound)
         XCTAssertEqual(clean.opacity, IslandBackgroundStyle.opacityRange.lowerBound)
         XCTAssertEqual(clean.imageBlur, 0)
-        XCTAssertEqual(clean.auroraOverlay, 0.25)
+        XCTAssertEqual(clean.auroraOverlay, 0)
         XCTAssertEqual(clean.gradientAngle, 360)
         XCTAssertEqual(clean.gradient.count, 2)
         XCTAssertNil(clean.imageFileName)
@@ -136,7 +136,13 @@ final class IslandBackgroundStyleTests: XCTestCase {
         XCTAssertEqual(style.opacity, IslandBackgroundStyle.default.opacity)
 
         let unknownKind = try JSONDecoder().decode(IslandBackgroundStyle.self, from: Data(#"{"kind":"video"}"#.utf8))
-        XCTAssertEqual(unknownKind.kind, .aurora)
+        XCTAssertEqual(unknownKind.kind, .standard)
+    }
+
+    func testSavedAuroraKindStillLoadsAsTheBuiltInLook() throws {
+        let style = try JSONDecoder().decode(IslandBackgroundStyle.self, from: Data(#"{"kind":"aurora","auroraOverlay":0.25}"#.utf8))
+        XCTAssertEqual(style.kind, .standard)
+        XCTAssertEqual(style.auroraOverlay, 0.25, "an overlay someone saved is kept")
     }
 
     func testPresetsAreValid() {
@@ -247,19 +253,19 @@ final class IslandSettingsBackgroundTests: XCTestCase {
     func testBuiltInLookIsDefaultAndSwitchingBackKeepsCustomChoices() async throws {
         let storage = makeStorage()
         let settings = IslandSettings(storage: storage)
-        XCTAssertEqual(settings.background.kind, .aurora, "a fresh install keeps the original frosted neon aurora")
+        XCTAssertEqual(settings.background.kind, .standard, "a fresh install gets the built-in ink surface")
         XCTAssertFalse(settings.background.usesCustomFill)
 
         try settings.importBackgroundImage(from: try writeFile("mine.png"))
         settings.background.solid = IslandBackgroundStyle.solidPresets[3].color
         let imageURL = try XCTUnwrap(settings.backgroundImageURL)
 
-        settings.background.kind = .aurora
+        settings.background.kind = .standard
         XCTAssertFalse(settings.background.usesCustomFill, "back on the built-in look")
         XCTAssertEqual(settings.backgroundImageURL, imageURL, "the photo is kept for switching back")
 
         let relaunched = IslandSettings(storage: IslandSettingsStorage(folder: storage.folder, defaultsSuite: storage.defaultsSuite))
-        XCTAssertEqual(relaunched.background.kind, .aurora)
+        XCTAssertEqual(relaunched.background.kind, .standard)
         XCTAssertEqual(relaunched.background.solid, IslandBackgroundStyle.solidPresets[3].color)
         relaunched.background.kind = .image
         XCTAssertEqual(relaunched.backgroundImageURL, imageURL)

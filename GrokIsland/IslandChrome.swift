@@ -2,38 +2,401 @@ import AppKit
 import ImageIO
 import SwiftUI
 
-/// Shared chrome for the floating island: aurora sky glass, a thin aurora edge, spring reveal.
+/// Shared chrome for the floating island, after macOS Control Center rather than a dashboard:
+/// one dark frosted panel, soft platters a step lighter than it, capsule controls, and corners
+/// that nest (the panel's 24 pt around 12 pt platters, 12 pt in from its edge).
+///
+/// Color carries meaning only. `accent` marks the one thing you're interacting with; green,
+/// amber, orange, and red are task states. Everything else is white at some opacity.
 enum IslandChrome {
-    static let neonCyan = Color(red: 0.28, green: 0.96, blue: 1.0)
-    static let electricGreen = Color(red: 0.62, green: 0.98, blue: 0.45)
-    static let alertRed = Color(red: 1.0, green: 0.36, blue: 0.44)
-    static let amber = Color(red: 1.0, green: 0.80, blue: 0.30)
-    static let ember = Color(red: 1.0, green: 0.56, blue: 0.22)
+    static let name = "NewIsland"
 
-    static let cornerRadius: CGFloat = 16
+    static let accent = Color(red: 0.45, green: 0.64, blue: 1.0)
+    static let positive = Color(red: 0.42, green: 0.82, blue: 0.55)
+    static let danger = Color(red: 0.95, green: 0.42, blue: 0.42)
+    static let caution = Color(red: 0.96, green: 0.76, blue: 0.36)
+    static let ember = Color(red: 0.97, green: 0.58, blue: 0.30)
 
-    /// Thin neon rule between the island's layers.
-    static let layerRule = LinearGradient(
-        colors: [neonCyan.opacity(0), neonCyan.opacity(0.45), electricGreen.opacity(0.3), neonCyan.opacity(0)],
-        startPoint: .leading,
-        endPoint: .trailing
+    /// Near-black, a touch warm, so it sits next to the notch without looking like a hole.
+    static let ink = Color(red: 0.075, green: 0.075, blue: 0.085)
+    /// Platters, tiles, and fields at rest; a step up on hover, another while pressed.
+    static let surface = Color.white.opacity(0.06)
+    static let surfaceRaised = Color.white.opacity(0.10)
+    static let surfacePressed = Color.white.opacity(0.14)
+    /// The selected option's thumb in a segmented control.
+    static let thumb = Color.white.opacity(0.17)
+    static let hairline = Color.white.opacity(0.10)
+    static let edge = Color.white.opacity(0.11)
+    /// Panel rim: light from above, fading toward the bottom.
+    static let rim = LinearGradient(
+        colors: [Color.white.opacity(0.16), Color.white.opacity(0.06)],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
-    static let borderGradient = LinearGradient(
-        colors: [
-            neonCyan.opacity(0.9),
-            electricGreen.opacity(0.7),
-            Color(red: 0.55, green: 0.36, blue: 0.95).opacity(0.85),
-            Color(red: 0.35, green: 0.75, blue: 1.0).opacity(0.85)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static let cornerRadius: CGFloat = 24
+    /// Panel edge to content. Platter corners nest inside it.
+    static let padding: CGFloat = 12
+    /// The wide island's left column: home's DDL and Grok, a run's question, the editor's fields.
+    /// Wide enough for three shortcut tiles and the Grok placeholders in full.
+    static let leadingColumnWidth: CGFloat = 280
+    /// Either side of the hairline between the two columns.
+    static let columnGap: CGFloat = 14
+    static let platterRadius: CGFloat = 12
+    static let fieldRadius: CGFloat = 8
+    /// Smallest click target for a toolbar glyph.
+    static let iconTarget: CGFloat = 26
 
     /// Paired with the panel frame timing in `IslandPanelController.applyFrame`.
-    static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.78, blendDuration: 0.1)
+    static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.86, blendDuration: 0.1)
+    /// Hover and press feedback: quick, no bounce.
+    static let hoverFade = Animation.easeOut(duration: 0.12)
+    /// A segmented control's thumb sliding to the new choice.
+    static let selectSpring = Animation.spring(response: 0.3, dampingFraction: 0.88)
 
-    static let revealTransition: AnyTransition = .scale(scale: 0.84, anchor: .top).combined(with: .opacity)
+    static let revealTransition: AnyTransition = .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
+}
+
+/// One-pixel divider between rows, or between the island's two columns when vertical.
+struct IslandHairline: View {
+    var axis: Axis = .horizontal
+
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        let thickness = 1 / max(displayScale, 1)
+        Rectangle()
+            .fill(IslandChrome.hairline)
+            .frame(width: axis == .vertical ? thickness : nil, height: axis == .horizontal ? thickness : nil)
+            .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    /// Small grey label that names a section, in place of boxes and colored badges.
+    func islandSectionLabel() -> some View {
+        font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    /// Borderless text field on a soft fill; reads as part of the island rather than a system box.
+    func islandField(highlighted: Bool = false) -> some View {
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous)
+        return textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background { shape.fill(IslandChrome.surface) }
+            .overlay {
+                shape
+                    .strokeBorder(
+                        highlighted ? IslandChrome.accent.opacity(0.8) : IslandChrome.hairline,
+                        lineWidth: highlighted ? 1 : 0.5
+                    )
+                    .allowsHitTesting(false)
+            }
+    }
+
+    /// Single-line field with its action tucked inside the trailing end, shaped like Spotlight.
+    func islandCapsuleField(highlighted: Bool = false) -> some View {
+        let shape = Capsule(style: .continuous)
+        return textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
+            .frame(minHeight: 30)
+            .background { shape.fill(IslandChrome.surface) }
+            .overlay {
+                shape
+                    .strokeBorder(
+                        highlighted ? IslandChrome.accent.opacity(0.8) : IslandChrome.hairline,
+                        lineWidth: highlighted ? 1 : 0.5
+                    )
+                    .allowsHitTesting(false)
+            }
+    }
+
+    /// A Control Center–style module: a soft rounded fill one step lighter than the panel.
+    /// `tint` washes it in a state color, for a confirmation or a problem.
+    func islandPlatter(inset: CGFloat = 10, raised: Bool = false, tint: Color? = nil) -> some View {
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
+        return padding(inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if let tint {
+                    shape.fill(tint.opacity(0.12))
+                } else {
+                    shape.fill(raised ? IslandChrome.surfaceRaised : IslandChrome.surface)
+                }
+            }
+            .overlay {
+                shape
+                    .strokeBorder(tint.map { $0.opacity(0.32) } ?? IslandChrome.hairline, lineWidth: tint == nil ? 0.5 : 1)
+                    .allowsHitTesting(false)
+            }
+    }
+
+    /// The capsule groove that `IslandSegment`s sit in.
+    func islandSegmentTrack() -> some View {
+        padding(2)
+            .background { Capsule(style: .continuous).fill(IslandChrome.surface) }
+            .overlay {
+                Capsule(style: .continuous)
+                    .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+/// A small label over one platter, the way grouped settings lists read. `accessory` sits at the
+/// label's trailing end, for a reset or refresh.
+struct IslandGroup<Content: View, Accessory: View>: View {
+    let title: String
+    let content: Content
+    let accessory: Accessory
+
+    init(_ title: String, @ViewBuilder content: () -> Content, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self.content = content()
+        self.accessory = accessory()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .islandSectionLabel()
+                Spacer(minLength: 0)
+                accessory
+            }
+            .frame(minHeight: 18)
+            .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .islandPlatter()
+        }
+    }
+}
+
+extension IslandGroup where Accessory == EmptyView {
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.init(title, content: content) { EmptyView() }
+    }
+}
+
+// MARK: - Controls
+
+/// Capsule button. `.prominent` is the one main action in view, white with dark text the way
+/// iOS fills its primary buttons; `.quiet` has no fill until hovered.
+struct IslandPillButtonStyle: ButtonStyle {
+    enum Kind {
+        case regular
+        case prominent
+        case destructive
+        case quiet
+    }
+
+    var kind: Kind = .regular
+    var compact = false
+
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        IslandPillBody(configuration: configuration, kind: kind, compact: compact)
+    }
+}
+
+private struct IslandPillBody: View {
+    let configuration: ButtonStyleConfiguration
+    let kind: IslandPillButtonStyle.Kind
+    let compact: Bool
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    var body: some View {
+        configuration.label
+            .font(.system(size: compact ? 11 : 12, weight: .medium))
+            .lineLimit(1)
+            .foregroundStyle(foreground)
+            .padding(.horizontal, compact ? 9 : 12)
+            .frame(minHeight: compact ? 22 : 28)
+            .background { Capsule(style: .continuous).fill(fill) }
+            .contentShape(Capsule(style: .continuous))
+            .opacity(isEnabled ? 1 : 0.4)
+            .onHover { hovering = $0 }
+            .animation(IslandChrome.hoverFade, value: hovering)
+            .animation(IslandChrome.hoverFade, value: configuration.isPressed)
+    }
+
+    private var lit: Bool { isEnabled && (hovering || configuration.isPressed) }
+
+    private var foreground: Color {
+        switch kind {
+        case .prominent: IslandChrome.ink
+        case .destructive: IslandChrome.danger
+        case .regular: Color.primary
+        case .quiet: lit ? Color.primary : Color.secondary
+        }
+    }
+
+    private var fill: Color {
+        switch kind {
+        case .prominent:
+            Color.white.opacity(configuration.isPressed ? 0.72 : (lit ? 0.96 : 0.88))
+        case .destructive:
+            IslandChrome.danger.opacity(configuration.isPressed ? 0.26 : (lit ? 0.2 : 0.14))
+        case .regular:
+            configuration.isPressed ? IslandChrome.surfacePressed : (lit ? IslandChrome.surfaceRaised : IslandChrome.surface)
+        case .quiet:
+            configuration.isPressed ? IslandChrome.surfaceRaised : (lit ? IslandChrome.surface : Color.clear)
+        }
+    }
+}
+
+/// Round glyph button for headers and toolbars: a 26 pt target that lights up under the pointer.
+struct IslandIconButtonStyle: ButtonStyle {
+    var tint: Color?
+    /// On, like a pinned pin: brighter glyph on a resting fill.
+    var active = false
+    var size: CGFloat = IslandChrome.iconTarget
+
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        IslandIconBody(configuration: configuration, tint: tint, active: active, size: size)
+    }
+}
+
+private struct IslandIconBody: View {
+    let configuration: ButtonStyleConfiguration
+    let tint: Color?
+    let active: Bool
+    let size: CGFloat
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    var body: some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(tint ?? (active || hovering ? Color.primary : Color.secondary))
+            .frame(width: size, height: size)
+            .background { Circle().fill(fill) }
+            .contentShape(Circle())
+            .opacity(isEnabled ? 1 : 0.35)
+            .onHover { hovering = $0 }
+            .animation(IslandChrome.hoverFade, value: hovering)
+            .animation(IslandChrome.hoverFade, value: configuration.isPressed)
+    }
+
+    private var fill: Color {
+        if configuration.isPressed { return IslandChrome.surfacePressed }
+        if hovering, isEnabled { return IslandChrome.surfaceRaised }
+        return active ? IslandChrome.surface : Color.clear
+    }
+}
+
+/// Tiles and rows that draw their own surface: they only dip a little while pressed.
+struct IslandPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(IslandChrome.hoverFade, value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == IslandPillButtonStyle {
+    static func islandPill(_ kind: IslandPillButtonStyle.Kind = .regular, compact: Bool = false) -> IslandPillButtonStyle {
+        IslandPillButtonStyle(kind: kind, compact: compact)
+    }
+}
+
+extension ButtonStyle where Self == IslandIconButtonStyle {
+    static func islandIcon(tint: Color? = nil, active: Bool = false) -> IslandIconButtonStyle {
+        IslandIconButtonStyle(tint: tint, active: active)
+    }
+}
+
+extension ButtonStyle where Self == IslandPressButtonStyle {
+    static var islandPress: IslandPressButtonStyle { IslandPressButtonStyle() }
+}
+
+/// One option in an `islandSegmentTrack()`. The selected option rides a raised thumb that
+/// slides between options through `namespace`.
+struct IslandSegment: View {
+    let title: String
+    var count: Int?
+    let selected: Bool
+    /// A drag hovers this option (the 暂存 tab is spring-loaded).
+    var targeted = false
+    let namespace: Namespace.ID
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title)
+                if let count, count > 0 {
+                    Text("\(count)")
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .font(.system(size: 12, weight: selected ? .semibold : .medium))
+            .foregroundStyle(targeted ? IslandChrome.accent : (selected ? Color.primary : Color.secondary))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, minHeight: 24)
+            .background {
+                if selected {
+                    Capsule(style: .continuous)
+                        .fill(IslandChrome.thumb)
+                        .shadow(color: .black.opacity(0.22), radius: 1.5, y: 1)
+                        .matchedGeometryEffect(id: "thumb", in: namespace)
+                } else if targeted {
+                    Capsule(style: .continuous).fill(IslandChrome.accent.opacity(0.16))
+                } else if hovering {
+                    Capsule(style: .continuous).fill(Color.white.opacity(0.04))
+                }
+            }
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(IslandChrome.hoverFade, value: hovering)
+    }
+}
+
+/// The collapsed strip's outline: the top flares into the bottom of the menu bar and the bottom
+/// rounds off like the camera housing, so the strip reads as part of the notch.
+struct NotchShape: InsettableShape {
+    var flare: CGFloat = 6
+    var bottomRadius: CGFloat = 10
+    var insetAmount: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let box = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        guard box.width > 0, box.height > 0 else { return Path() }
+        let f = min(flare, box.width / 4, box.height / 2)
+        let r = min(bottomRadius, (box.width - 2 * f) / 2, box.height - f)
+        var path = Path()
+        path.move(to: CGPoint(x: box.minX, y: box.minY))
+        path.addQuadCurve(to: CGPoint(x: box.minX + f, y: box.minY + f), control: CGPoint(x: box.minX + f, y: box.minY))
+        path.addLine(to: CGPoint(x: box.minX + f, y: box.maxY - r))
+        path.addQuadCurve(to: CGPoint(x: box.minX + f + r, y: box.maxY), control: CGPoint(x: box.minX + f, y: box.maxY))
+        path.addLine(to: CGPoint(x: box.maxX - f - r, y: box.maxY))
+        path.addQuadCurve(to: CGPoint(x: box.maxX - f, y: box.maxY - r), control: CGPoint(x: box.maxX - f, y: box.maxY))
+        path.addLine(to: CGPoint(x: box.maxX - f, y: box.minY + f))
+        path.addQuadCurve(to: CGPoint(x: box.maxX, y: box.minY), control: CGPoint(x: box.maxX - f, y: box.minY))
+        path.closeSubpath()
+        return path
+    }
+
+    func inset(by amount: CGFloat) -> NotchShape {
+        var shape = self
+        shape.insetAmount += amount
+        return shape
+    }
 }
 
 /// Colors sampled from the aurora photo, plus the island's own navy / neon blues.
@@ -120,6 +483,7 @@ private enum AuroraField {
 }
 
 /// Continuously shifting aurora sky: mesh gradient, light curtains, faint stars. No glyphs.
+/// Only drawn when the user turns up "aurora overlay" on a custom background.
 struct AuroraBackdrop: View {
     /// 0...1 strength of the bright curtains and stars.
     var glow: Double = 1
@@ -163,8 +527,8 @@ private struct AuroraSky: View {
     }
 }
 
-/// Dark frosted fill. Material is rearmost so it can blur the desktop; the aurora (or the
-/// user's own fill) sits on top of it, and a dark veil keeps white UI text readable.
+/// Dark frosted fill. Material is rearmost so it can blur the desktop; the ink (or the user's
+/// own fill) sits on top of it, and a dark veil keeps white UI text readable.
 struct IslandGlassBackdrop: View {
     var glow: Double = 1
     var style: IslandBackgroundStyle = .default
@@ -183,12 +547,12 @@ struct IslandGlassBackdrop: View {
                 }
                 customVeil
             } else {
-                AuroraBackdrop(glow: glow)
-                    .opacity(0.94)
+                IslandChrome.ink.opacity(0.94)
+                // Barely-there top light, so the surface has a direction without a gradient show.
                 LinearGradient(
-                    colors: [.black.opacity(0.24), .black.opacity(0.06), .black.opacity(0.34)],
+                    colors: [.white.opacity(0.035), .clear],
                     startPoint: .top,
-                    endPoint: .bottom
+                    endPoint: UnitPoint(x: 0.5, y: 0.35)
                 )
             }
         }
@@ -196,10 +560,10 @@ struct IslandGlassBackdrop: View {
         .accessibilityHidden(true)
     }
 
-    /// Nil means "use the stock aurora", including when the picked image can't be read.
+    /// Nil means "use the stock ink surface", including when the picked image can't be read.
     private var customFill: IslandBackgroundFill? {
         switch style.kind {
-        case .aurora:
+        case .standard:
             return nil
         case .solid, .gradient:
             return IslandBackgroundFill(style: style, image: nil)
@@ -227,7 +591,7 @@ struct IslandBackgroundFill: View {
 
     var body: some View {
         switch style.kind {
-        case .aurora:
+        case .standard:
             Color.clear
         case .solid:
             Rectangle().fill(Color(islandRGB: style.solid))
@@ -304,8 +668,8 @@ enum IslandBackgroundImageCache {
 }
 
 extension View {
-    /// Rounded (or capsule) aurora glass with a thin aurora stroke. Pass a custom `background`
-    /// to swap the aurora for the user's fill; the neon stroke stays either way.
+    /// Ink glass with a faint top-lit rim. Pass a custom `background` to swap the ink for the
+    /// user's fill. `emphasized` (a drag over the island) turns the rim to the accent.
     func islandChrome<S: InsettableShape>(
         _ shape: S,
         glow: Double = 1,
@@ -320,21 +684,10 @@ extension View {
         .overlay {
             shape
                 .strokeBorder(
-                    IslandChrome.borderGradient,
+                    emphasized ? AnyShapeStyle(IslandChrome.accent) : AnyShapeStyle(IslandChrome.rim),
                     lineWidth: emphasized ? 1.5 : 1
                 )
-                .shadow(
-                    color: IslandChrome.neonCyan.opacity(emphasized ? 0.9 : 0.45),
-                    radius: emphasized ? 5 : 3
-                )
                 .allowsHitTesting(false)
-        }
-        .overlay {
-            if emphasized {
-                shape
-                    .strokeBorder(IslandChrome.neonCyan.opacity(0.95), lineWidth: 1.5)
-                    .allowsHitTesting(false)
-            }
         }
     }
 }

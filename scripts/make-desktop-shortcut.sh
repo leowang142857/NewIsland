@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build GrokIsland (if needed) and put a Finder alias named 「grok岛」 on the Desktop.
+# Build GrokIsland (if needed) and put a Finder alias named 「NewIsland」 on the Desktop.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,19 +20,19 @@ fi
 
 DEST="$HOME/Applications"
 mkdir -p "$DEST"
-rm -rf "$DEST/grok岛.app"
-cp -R "$APP" "$DEST/grok岛.app"
+rm -rf "$DEST/NewIsland.app"
+cp -R "$APP" "$DEST/NewIsland.app"
 
 osascript <<'APPLESCRIPT'
-set appPath to (POSIX file (POSIX path of (path to home folder as text) & "Applications/grok岛.app"))
+set appPath to (POSIX file (POSIX path of (path to home folder as text) & "Applications/NewIsland.app"))
 set desk to path to desktop folder
 tell application "Finder"
-    if exists file "grok岛" of desk then
-        delete file "grok岛" of desk
+    if exists file "NewIsland" of desk then
+        delete file "NewIsland" of desk
     end if
-    make new alias file at desk to appPath with properties {name:"grok岛"}
+    make new alias file at desk to appPath with properties {name:"NewIsland"}
 end tell
 APPLESCRIPT
 
-echo "Desktop alias created: ~/Desktop/grok岛"
-echo "App copy: ~/Applications/grok岛.app"
+echo "Desktop alias created: ~/Desktop/NewIsland"
+echo "App copy: ~/Applications/NewIsland.app"

@@ -162,7 +162,7 @@ final class TaskLightBoardTests: XCTestCase {
         let old = run("整理错题", .succeeded, updated: now.addingTimeInterval(-600))
         var snapshot = CloudActivitySnapshot()
         snapshot.agents = [
-            CloudAgentSummary(id: "mine", name: "grok岛 · 翻译", status: "ACTIVE", url: "https://cursor.com/agents/mine"),
+            CloudAgentSummary(id: "mine", name: "NewIsland · 翻译", status: "ACTIVE", url: "https://cursor.com/agents/mine"),
             CloudAgentSummary(id: "other", name: "Fix login", status: "ACTIVE", url: "https://cursor.com/agents/other")
         ]
         snapshot.pullRequests = [

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Borderless always-on-top panel, pinned to the top center of the preferred screen.
 ///
-/// Chrome (aurora glass, aurora edge) lives in the SwiftUI root.
+/// Chrome (ink glass, hairline edge) lives in the SwiftUI root.
 /// Proximity show / auto-retract is wired here.
 final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -23,7 +23,7 @@ final class IslandPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         hidesOnDeactivate = false
@@ -33,10 +33,9 @@ final class IslandPanel: NSPanel {
     }
 }
 
+/// Both the strip and the expanded island hang below the menu bar, centered under the notch,
+/// so the menu bar and its status items stay visible and clickable.
 enum ScreenAnchor {
-    /// Extra gap under the camera housing so expanded chrome is not flush against the notch.
-    static let expandedNotchGap: CGFloat = 6
-
     static func preferredScreen() -> NSScreen {
         let mouse = NSEvent.mouseLocation
         if let hit = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) {
@@ -45,24 +44,21 @@ enum ScreenAnchor {
         return NSScreen.main ?? NSScreen.screens[0]
     }
 
-    /// Peek strip: nest into the notch / menu-bar band (Dynamic Island style).
-    static func topY(on screen: NSScreen) -> CGFloat {
-        screen.safeAreaInsets.top > 0 ? screen.frame.maxY : screen.visibleFrame.maxY
+    static func menuBarHeight(on screen: NSScreen) -> CGFloat {
+        IslandPlacement.menuBarHeight(
+            frame: screen.frame,
+            visibleFrame: screen.visibleFrame,
+            notchHeight: screen.safeAreaInsets.top,
+            barThickness: NSStatusBar.system.thickness
+        )
     }
 
-    /// Expanded shell: sit fully below the camera housing so the header middle is not clipped.
-    static func expandedTopY(on screen: NSScreen) -> CGFloat {
-        if screen.safeAreaInsets.top > 0 {
-            return screen.frame.maxY - screen.safeAreaInsets.top - expandedNotchGap
-        }
-        return screen.visibleFrame.maxY
-    }
-
-    /// Notch peek pins to `frame.maxY`. Expanded clears the notch. No notch: under the menu bar.
-    static func topCenterFrame(size: CGSize, on screen: NSScreen, clearsNotch: Bool = false) -> NSRect {
-        let x = screen.frame.midX - size.width / 2
-        let top = clearsNotch ? expandedTopY(on: screen) : topY(on: screen)
-        return NSRect(origin: NSPoint(x: x, y: top - size.height), size: size)
+    /// The camera housing's width, read from the menu-bar areas either side of it.
+    static func notchWidth(on screen: NSScreen) -> CGFloat? {
+        guard screen.safeAreaInsets.top > 0,
+              let left = screen.auxiliaryTopLeftArea,
+              let right = screen.auxiliaryTopRightArea else { return nil }
+        return screen.frame.width - left.width - right.width
     }
 }
 
@@ -77,9 +73,13 @@ final class IslandPresence: ObservableObject {
     @Published var isPinned = false
     @Published var isDropTargeted = false
     @Published var isHoveringPanel = false
+    /// The island's screen has a notch, so the collapsed strip sits right under the camera.
+    @Published var onNotchedScreen = false
 
-    func shouldHold(engine: IslandEngine) -> Bool {
-        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil || Self.systemPickerIsOpen
+    /// A drag out of the tray keeps the island up: its source row must outlive the drag.
+    func shouldHold(engine: IslandEngine, tray: FileTray) -> Bool {
+        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil
+            || tray.isDraggingOut || Self.systemPickerIsOpen
     }
 
     /// The file picker and color panel float outside the island. Retracting under them would
@@ -93,13 +93,12 @@ final class IslandPresence: ObservableObject {
 final class IslandPanelController {
     /// Lock + per-task lights on the left, the name, and the next DDL on the right.
     static let defaultPeekSize = CGSize(width: PeekStrip.defaultWidth, height: PeekStrip.height)
-    /// Status lights, DDL bar, function strips, and the module grid stacked in layers.
-    static let shellSize = CGSize(width: 340, height: 520)
     static let retractDelay: TimeInterval = 0.55
     static let pollInterval: TimeInterval = 0.08
 
     private let engine: IslandEngine
     private let settings: IslandSettings
+    private let tray: FileTray
     let presence = IslandPresence()
     private let panel: IslandPanel
     private var screenObserver: NSObjectProtocol?
@@ -111,19 +110,22 @@ final class IslandPanelController {
         engine: IslandEngine,
         monitor: CloudActivityMonitor,
         settings: IslandSettings,
-        deadlines: DeadlineStore
+        deadlines: DeadlineStore,
+        tray: FileTray
     ) {
         self.engine = engine
         self.settings = settings
+        self.tray = tray
         let screen = ScreenAnchor.preferredScreen()
-        let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize(on: screen), on: screen)
+        let frame = Self.frame(revealed: false, on: screen)
         panel = IslandPanel(contentRect: frame)
         let root = IslandRootView(
             engine: engine,
             presence: presence,
             monitor: monitor,
             settings: settings,
-            deadlines: deadlines
+            deadlines: deadlines,
+            tray: tray
         )
         let host = FirstMouseHostingView(rootView: root)
         host.wantsLayer = true
@@ -166,8 +168,13 @@ final class IslandPanelController {
     }
 
     private func tick() {
+        // A drag that ends off the island (say, back on the desktop) never reaches a drop target
+        // to clear this, and the island would stay held open. A released button means it is over.
+        if presence.isDropTargeted, NSEvent.pressedMouseButtons & 1 == 0 {
+            presence.isDropTargeted = false
+        }
         if presence.isRevealed {
-            if mouseInHotZone() || presence.shouldHold(engine: engine) {
+            if mouseInHotZone() || presence.shouldHold(engine: engine, tray: tray) {
                 cancelRetract()
             } else {
                 scheduleRetract()
@@ -183,11 +190,11 @@ final class IslandPanelController {
     /// The peek strip's own hover flag is ignored here: the lock slice must not count as hover.
     private func collapsedStripWantsReveal() -> Bool {
         let mouse = NSEvent.mouseLocation
-        let frame = panel.frame
+        let strip = Self.frame(revealed: false, on: ScreenAnchor.preferredScreen())
         return PeekStrip.shouldReveal(
             locked: settings.isPeekLocked,
-            mouseInStrip: Self.hotZone(revealed: false, panelFrame: frame, screen: ScreenAnchor.preferredScreen()).contains(mouse),
-            mouseOnLock: PeekStrip.isOnLock(mouseX: mouse.x, stripMinX: frame.minX),
+            mouseInStrip: strip.contains(mouse),
+            mouseOnLock: PeekStrip.isOnLock(mouseX: mouse.x, stripMinX: strip.minX),
             dropTargeted: presence.isDropTargeted,
             pinned: presence.isPinned,
             awaitingConfirmation: engine.pendingLocal != nil
@@ -213,7 +220,7 @@ final class IslandPanelController {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.retractWork = nil
-            if !self.mouseInHotZone(), !self.presence.shouldHold(engine: self.engine) {
+            if !self.mouseInHotZone(), !self.presence.shouldHold(engine: self.engine, tray: self.tray) {
                 self.setRevealed(false)
             }
         }
@@ -233,9 +240,11 @@ final class IslandPanelController {
         } else {
             screen = ScreenAnchor.preferredScreen()
         }
-        let size = presence.isRevealed ? Self.shellSize : Self.peekSize(on: screen)
-        // Expanded: drop below the webcam/notch so the top-row middle stays readable.
-        let next = ScreenAnchor.topCenterFrame(size: size, on: screen, clearsNotch: presence.isRevealed)
+        let next = Self.frame(revealed: presence.isRevealed, on: screen)
+        let notched = ScreenAnchor.notchWidth(on: screen) != nil
+        if presence.onNotchedScreen != notched { presence.onNotchedScreen = notched }
+        // The strip is part of the notch and casts nothing; the expanded island floats over the desktop.
+        if presence.isRevealed { panel.hasShadow = true }
         guard panel.frame != next else { return }
         if animated {
             // Soft settle, matched to `IslandChrome.expandSpring` on the SwiftUI scale.
@@ -245,41 +254,57 @@ final class IslandPanelController {
                 context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.22, 1.0)
                 context.allowsImplicitAnimation = true
                 panel.animator().setFrame(next, display: true)
+            } completionHandler: { [weak self] in
+                Task { @MainActor in self?.settleShadow() }
             }
         } else {
             panel.setFrame(next, display: true)
+            settleShadow()
         }
     }
 
-    /// Hugs the camera housing: one short wing each side of the notch for the lights and DDL badge.
-    static func peekSize(on screen: NSScreen) -> CGSize {
-        var notch: CGFloat?
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            notch = screen.frame.width - left.width - right.width
+    /// The shadow follows the content's alpha, so recompute it once the frame and content settle.
+    private func settleShadow() {
+        panel.hasShadow = presence.isRevealed
+        panel.invalidateShadow()
+    }
+
+    /// Strip or island, hanging below the menu bar and centered under the notch.
+    static func frame(revealed: Bool, on screen: NSScreen) -> NSRect {
+        let bar = ScreenAnchor.menuBarHeight(on: screen)
+        if revealed {
+            return IslandPlacement.shellFrame(size: shellSize(on: screen, menuBarHeight: bar), screen: screen.frame, menuBarHeight: bar)
         }
-        return CGSize(width: PeekStrip.width(notchWidth: notch), height: PeekStrip.height)
+        return IslandPlacement.stripFrame(size: peekSize(on: screen), screen: screen.frame, menuBarHeight: bar)
+    }
+
+    /// A wide, short panel, as much of `IslandShell`'s 3 : 1 as the screen allows.
+    static func shellSize(on screen: NSScreen, menuBarHeight: CGFloat) -> CGSize {
+        let top = IslandPlacement.shellTop(screen: screen.frame, menuBarHeight: menuBarHeight)
+        return IslandShell.size(screenWidth: screen.frame.width, room: top - screen.visibleFrame.minY)
+    }
+
+    /// As wide as the notch, so the strip stays in the camera's shadow.
+    static func peekSize(on screen: NSScreen) -> CGSize {
+        CGSize(width: PeekStrip.width(notchWidth: ScreenAnchor.notchWidth(on: screen)), height: PeekStrip.height)
     }
 
     /// Uses `NSEvent.mouseLocation` (no Accessibility / Input Monitoring).
     private func mouseInHotZone() -> Bool {
-        let mouse = NSEvent.mouseLocation
         let screen = presence.isRevealed
             ? (revealedOnScreen ?? ScreenAnchor.preferredScreen())
             : ScreenAnchor.preferredScreen()
-        return Self.hotZone(
-            revealed: presence.isRevealed,
-            panelFrame: panel.frame,
-            screen: screen
-        ).contains(mouse)
+        return Self.hotZone(revealed: presence.isRevealed, on: screen).contains(NSEvent.mouseLocation)
     }
 
-    /// Retracted: only the peek strip itself. Revealed: the panel, with a tiny
-    /// edge so moving onto a button at the border does not instantly hide it.
-    static func hotZone(revealed: Bool, panelFrame: NSRect, screen: NSScreen) -> NSRect {
-        if revealed {
-            return panelFrame.insetBy(dx: -4, dy: -4)
-        }
-        return panelFrame
+    /// Measured from where the panel is headed, not where an animation has it right now.
+    static func hotZone(revealed: Bool, on screen: NSScreen) -> NSRect {
+        IslandPlacement.hotZone(
+            revealed: revealed,
+            frame: frame(revealed: revealed, on: screen),
+            screen: screen.frame,
+            menuBarHeight: ScreenAnchor.menuBarHeight(on: screen)
+        )
     }
 }
 
@@ -289,6 +314,7 @@ struct IslandRootView: View {
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
+    let tray: FileTray
 
     var body: some View {
         ZStack {
@@ -298,7 +324,8 @@ struct IslandRootView: View {
                     presence: presence,
                     monitor: monitor,
                     settings: settings,
-                    deadlines: deadlines
+                    deadlines: deadlines,
+                    tray: tray
                 )
                 .transition(IslandChrome.revealTransition)
             } else {
@@ -309,14 +336,15 @@ struct IslandRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(IslandChrome.expandSpring, value: presence.isRevealed)
         .preferredColorScheme(.dark)
-        .tint(IslandChrome.neonCyan)
+        .tint(IslandChrome.accent)
         .onChange(of: engine.activeRunCount) { monitor.flash() }
     }
 }
 
-/// Thin top-center tab while the shell is retracted: the collapse lock and one light per task
-/// on the left, the most pressing DDL on the right. On a notched Mac the name sits under the
-/// camera and only the two wings show. Everything else waits for the expanded island.
+/// Small pill hanging from the bottom of the menu bar while the shell is retracted: the collapse
+/// lock and one light per task on the left, the most pressing DDL on the right. On a notched Mac
+/// it is exactly as wide as the notch and leaves the name out, so it reads as the camera's shadow.
+/// Everything else waits for the expanded island.
 struct PeekStripView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
@@ -324,13 +352,23 @@ struct PeekStripView: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
 
+    private static let shape = NotchShape(flare: PeekStrip.flare)
+
     var body: some View {
+        let emphasized = presence.isDropTargeted && !settings.isPeekLocked
         TimelineView(.periodic(from: .now, by: 5)) { context in
             content(now: context.date)
         }
+        .padding(.horizontal, PeekStrip.flare)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .islandChrome(Capsule(), glow: 0.8, emphasized: presence.isDropTargeted && !settings.isPeekLocked)
-        .islandFlash(Capsule(), trigger: monitor.flashCount)
+        .background(Self.shape.fill(Color.black))
+        .clipShape(Self.shape)
+        .overlay {
+            Self.shape
+                .strokeBorder(emphasized ? IslandChrome.accent : Color.clear, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .islandFlash(Self.shape, trigger: monitor.flashCount)
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
@@ -349,13 +387,18 @@ struct PeekStripView: View {
                 TaskLightStrip(lights: lights, limit: PeekStrip.lightLimit(count: lights.count))
                 Spacer(minLength: 0)
             }
-            .frame(width: PeekStrip.wingWidth)
+            .frame(width: PeekStrip.slotWidth - PeekStrip.flare)
 
-            Text("grok岛")
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity)
+            if presence.onNotchedScreen {
+                Spacer(minLength: 0)
+            } else {
+                Text(IslandChrome.name)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+            }
 
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
@@ -364,27 +407,27 @@ struct PeekStripView: View {
                 }
             }
             .padding(.trailing, PeekStrip.trailingInset)
-            .frame(width: PeekStrip.wingWidth)
+            .frame(width: PeekStrip.slotWidth - PeekStrip.flare)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Leftmost control. Its slice of the strip never triggers the hover reveal.
+    /// Leftmost control, the strip's full height. Its slice never triggers the hover reveal.
     private var lockButton: some View {
         let locked = settings.isPeekLocked
         return Button {
             settings.isPeekLocked.toggle()
         } label: {
             Image(systemName: locked ? "lock.fill" : "lock.open")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(locked ? IslandChrome.amber : Color.secondary)
-                .shadow(color: IslandChrome.amber.opacity(locked ? 0.7 : 0), radius: 3)
-                .frame(width: PeekStrip.lockZoneWidth, height: PeekStrip.height)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(locked ? IslandChrome.caution : Color.white.opacity(0.4))
+                .frame(width: PeekStrip.lockZoneWidth - PeekStrip.flare)
+                .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(locked ? "已锁定收起：鼠标悬停不会展开。点一下解锁" : "锁定收起：鼠标悬停不再自动展开")
-        .accessibilityLabel(locked ? "解锁，恢复悬停展开" : "锁定收起")
+        .help(locked ? "锁住了，鼠标经过不会展开 · 点一下解锁" : "点一下锁住，鼠标经过就不再展开")
+        .accessibilityLabel(locked ? "解锁岛" : "锁住岛")
     }
 
     private var dropBinding: Binding<Bool> {

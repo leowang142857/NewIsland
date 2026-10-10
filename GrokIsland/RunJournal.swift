@@ -19,7 +19,7 @@ final class RunJournal: ObservableObject {
 
     /// Oldest records beyond this are dropped when saving.
     static let maxStoredRuns = 80
-    static let interruptedMessage = "grok岛 退出时还在运行，已中断"
+    static let interruptedMessage = "NewIsland 退出时还在运行，已中断"
 
     private let fileURL: URL?
     private let encoder: JSONEncoder
@@ -79,7 +79,7 @@ final class RunJournal: ObservableObject {
             extraPrompt: extraPrompt,
             phase: phase,
             progress: 0,
-            message: phase == .awaitingConfirmation ? "等待本地确认" : "排队中",
+            message: phase == .awaitingConfirmation ? "等你确认后在本机运行" : "排队中",
             resultSummary: nil,
             createdAt: now,
             updatedAt: now,
