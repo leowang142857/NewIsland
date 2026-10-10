@@ -1,6 +1,6 @@
 # NewIsland
 
-NewIsland is a top-of-screen work island for Mac: deadlines, focus, and Ask Grok sit in one strip beside the notch, so you don't switch windows. Mac 上的灵动岛，把今天要做的事和问 Grok 放在屏幕最上面。 Keywords: Mac Dynamic Island, macOS menu bar island, notch productivity, deadline focus timer, ask Grok on Mac, 灵动岛 Mac, 顶部任务条, 截止日期 专注计时.
+NewIsland is a top-of-screen work island for Mac: deadlines, focus, and Ask Grok sit in one strip under the notch, so you don't switch windows. Mac 上的灵动岛，把今天要做的事和问 Grok 放在屏幕最上面。 Keywords: Mac Dynamic Island, macOS menu bar island, notch productivity, deadline focus timer, ask Grok on Mac, 灵动岛 Mac, 顶部任务条, 截止日期 专注计时.
 
 Maintained by [@leowang142857](https://github.com/leowang142857).
 
@@ -45,39 +45,48 @@ platform-independent Swift package (`GrokIslandCore`) with its own test suite.
   you drag files across it; click again to unlock. Hovering the lock itself does
   not expand the island, so you can always reach it. The lock state is remembered
   across launches.
-- On Macs with a notch, the peek strip is exactly as tall as the notch and flares
-  into the top edge of the screen, so it reads as part of the camera housing. It
-  only shows about 56 pt on each side of the notch. On screens without a notch it
-  is a ~164 pt capsule under the menu bar.
-- The expanded island is a tall column that drops just below the notch:
-  **264 pt wide and up to three times as tall (792 pt)**. When the screen is too
-  short for that, it stops 12 pt above the Dock (or the bottom of the screen),
-  but never gets shorter than 520 pt. The ratio lives in `IslandShell`
-  (`PeekStrip.swift`).
+- **The menu bar is never covered.** The strip and the island both hang below
+  it, so every menu and status item stays visible and clickable, and pointing at
+  the menu bar never opens the island.
+- The peek strip is a 22 pt pill hanging from the bottom of the menu bar. On
+  Macs with a notch it is exactly as wide as the notch (macOS reports the width)
+  and sits right under it, so it reads as the camera's shadow. On screens
+  without a notch it is 164 pt wide, centered under the menu bar.
+- The expanded island is a wide, short panel that opens 6 pt below the menu bar,
+  centered under the notch: **900 × 300 pt, three times as wide as it is tall**.
+  On a screen narrower than 932 pt it keeps 16 pt from each side, and when the
+  screen is too short for 300 pt it stops 12 pt above the Dock (or the bottom of
+  the screen). It never gets smaller than 720 × 272 pt. The numbers live in
+  `IslandShell` (`PeekStrip.swift`).
 - Hover detection polls `NSEvent.mouseLocation`, so no Accessibility or Input
   Monitoring permission is needed.
 
-The header holds the status light and name (click for Cloud Agent and PR
-activity), then what is running, or the time when nothing is, then the **gear**
-(Settings) and the **pin**.
+The header is one row across the island: the status light and name (click for
+Cloud Agent and PR activity), then on home one **task light** per running or
+recently finished task (they scroll sideways when there are more than fit), then
+what is running, or the time when nothing is, then the **gear** (Settings) and
+the **pin**.
 
-When expanded, the island is organized in layers, from top to bottom:
+Under the header, home is two columns split by a hairline:
 
-1. **Task lights** — one capsule per running or recently finished task.
-2. **DDL energy bar** — all open deadlines in one bar.
-3. **Grok quick actions** — three one-tap tiles, an "Ask Grok" field, and a
-   split-task field.
-4. **Modules / staging tray / records** — your module grid, the files you
-   parked on the island, or the history of runs.
+- **Left (280 pt): deadlines and Grok.** The **DDL energy bar** with all open
+  deadlines in one bar, then the **Grok quick actions**: three one-tap tiles, an
+  "Ask Grok" field, a split-task field, and the line that reopens the last answer.
+- **Right: modules / staging tray / records.** Three tabs (模块, 暂存, 记录) over
+  your module grid, the files you parked on the island, or the history of runs.
+
+The other pages use the width the same way: the module editor puts the name and
+executor beside the prompt, a run you asked about shows your question beside the
+answer, Cloud Agents and PRs sit side by side, and Settings has three columns.
 
 ### Look and feel
 
 The island follows macOS Control Center rather than a dashboard:
 
-- One dark frosted column. Content sits on soft **platters** a step lighter than
-  the column, edged with hairlines rather than shadows. The window casts a shadow
+- One dark frosted panel. Content sits on soft **platters** a step lighter than
+  the panel, edged with hairlines rather than shadows. The window casts a shadow
   only while the island is open.
-- Corners nest: the column's 24 pt corners sit 12 pt outside 12 pt platters, and
+- Corners nest: the island's 24 pt corners sit 12 pt outside 12 pt platters, and
   the send buttons are concentric with their capsule fields.
 - Controls are capsules and circles with clear targets (26 pt for header
   glyphs): a white **prominent** capsule for the one main action in view, quiet
@@ -91,9 +100,9 @@ The island follows macOS Control Center rather than a dashboard:
 Design tokens and the shared button styles live in `IslandChrome.swift`.
 
 When collapsed, the peek strip shows the collapse lock on the far left, then up
-to a few task lights (two lights plus a count when there are more than three),
-and the countdown of the most pressing deadline on the right (split across both
-sides of the notch on notched screens).
+to three task lights (two lights plus a count when there are more), and on the
+right the countdown of the next deadline when it is due within three days or
+overdue. Without a notch, the name sits between them.
 
 ### Modular island (function modules)
 
@@ -525,7 +534,7 @@ GrokIsland/
   PeekStrip.swift             # peek strip and expanded island geometry, collapse lock
   IslandChrome.swift          # design tokens, platters, buttons, glass backdrop
   IslandBackground.swift      # custom island background style, presets, veil
-  ShellView.swift             # expanded island: header, layers, module grid
+  ShellView.swift             # expanded island: header, two-column home, module grid
   ActivityViews.swift         # task lights and activity list
   DeadlineViews.swift         # DDL energy bar
   GrokViews.swift             # quick actions, run detail, settings pane
