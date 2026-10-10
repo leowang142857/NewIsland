@@ -15,7 +15,7 @@ struct RunJournalList: View {
         var title: String {
             switch self {
             case .all: "全部"
-            case .grok: "Grok 回答"
+            case .grok: "回答"
             }
         }
     }
@@ -24,6 +24,7 @@ struct RunJournalList: View {
     @State private var selecting = false
     @State private var selection: Set<UUID> = []
     @State private var note: String?
+    @Namespace private var filterThumb
 
     private var visibleRuns: [RunRecord] {
         switch filter {
@@ -41,20 +42,23 @@ struct RunJournalList: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             toolbar
             if let note {
                 Text(note)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
                     .transition(.opacity)
             }
             if visibleRuns.isEmpty {
-                Text(filter == .grok ? "还没有 Grok 回答。" : "还没有运行记录。")
+                Text(filter == .grok ? "还没有 Grok 的回答。" : "还没有记录。跑过的任务都会留在这里。")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
                     .padding(.top, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -76,42 +80,49 @@ struct RunJournalList: View {
         }
     }
 
+    /// The filter makes way for the selection actions, so either set fits the 240 pt column.
     private var toolbar: some View {
-        HStack(spacing: 8) {
-            Picker("", selection: $filter) {
-                ForEach(Filter.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.mini)
-            .frame(width: 124)
-
-            Spacer(minLength: 0)
-
+        HStack(spacing: 6) {
             if selecting {
                 Button(allVisibleSelected ? "全不选" : "全选", action: toggleAll)
+                    .buttonStyle(.islandPill(.quiet, compact: true))
+                Spacer(minLength: 0)
                 Button("删除 \(selection.count)", action: deleteSelection)
-                    .foregroundStyle(selection.isEmpty ? Color.secondary : IslandChrome.danger)
+                    .buttonStyle(.islandPill(.destructive, compact: true))
                     .disabled(selection.isEmpty)
                 Button("完成") {
                     selecting = false
                     selection = []
                 }
-                .foregroundStyle(.primary)
+                .buttonStyle(.islandPill(compact: true))
             } else {
-                Button("清理已完成", action: clearFinished)
+                HStack(spacing: 0) {
+                    ForEach(Filter.allCases) { option in
+                        IslandSegment(
+                            title: option.title,
+                            selected: filter == option,
+                            namespace: filterThumb
+                        ) {
+                            withAnimation(IslandChrome.selectSpring) { filter = option }
+                        }
+                    }
+                }
+                .frame(width: 104)
+                .islandSegmentTrack()
+
+                Spacer(minLength: 0)
+
+                Button("清掉已完成", action: clearFinished)
+                    .buttonStyle(.islandPill(.quiet, compact: true))
                     .disabled(finishedCount == 0)
-                    .help("删除所有已完成、失败、已取消的记录（\(finishedCount) 条）")
+                    .help("删掉做完、失败和取消的记录（\(finishedCount) 条）")
                 Button("选择") { selecting = true }
+                    .buttonStyle(.islandPill(.quiet, compact: true))
                     .disabled(engine.runs.isEmpty)
-                    .help("多选后批量删除")
+                    .help("选几条一起删")
             }
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .font(.system(size: 11))
+        .frame(height: 28)
     }
 
     private func tap(_ run: RunRecord) {
@@ -142,12 +153,12 @@ struct RunJournalList: View {
 
     private func delete(_ ids: Set<UUID>) {
         let removed = engine.deleteRuns(ids: ids)
-        show(removed > 0 ? "已删除 \(removed) 条记录" : "没有可删除的记录")
+        show(removed > 0 ? "删掉了 \(removed) 条" : "没有能删的")
     }
 
     private func clearFinished() {
         let removed = engine.clearFinishedRuns()
-        show("已清理 \(removed) 条已完成记录")
+        show("清掉了 \(removed) 条")
     }
 
     private func show(_ message: String) {
@@ -173,10 +184,10 @@ private struct RunRow: View {
     private var tag: String {
         switch run.origin {
         case .quickAsk: "问答"
-        case .quickAction: "功能条"
+        case .quickAction: "快捷"
         case .splitTask: "拆分"
         case .splitSubtask: "子任务"
-        case .module: run.executor == .local ? "本地" : "模块"
+        case .module: run.executor == .local ? "本机" : "模块"
         }
     }
 
@@ -184,7 +195,7 @@ private struct RunRow: View {
         HStack(alignment: .top, spacing: 8) {
             if selecting {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(selected ? IslandChrome.accent : Color.secondary)
             } else {
                 TaskLightDot(state: TaskLightBoard.state(for: run.phase), size: 6)
@@ -200,9 +211,10 @@ private struct RunRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     Spacer(minLength: 4)
-                    Text(run.createdAt.formatted(date: .omitted, time: .shortened))
+                    Text(RunDetailView.stamp(run.createdAt))
                         .font(.system(size: 10).monospacedDigit())
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
                 if let question = run.question {
                     Text(question)
@@ -222,35 +234,33 @@ private struct RunRow: View {
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, height: 16)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IslandIconButtonStyle(size: 20))
             .opacity(selecting ? 0 : (hovering ? 1 : 0))
             .disabled(selecting)
-            .help(run.isActive ? "取消并删除这条记录" : "删除这条记录")
+            .help(run.isActive ? "取消并删掉这条记录" : "删掉这条记录")
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .background {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(selected ? IslandChrome.accent.opacity(0.14) : Color.white.opacity(hovering ? 0.05 : 0))
+            RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous)
+                .fill(selected ? IslandChrome.accent.opacity(0.16) : (hovering ? IslandChrome.surface : Color.clear))
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .onHover { hovering = $0 }
-        .help(selecting ? "点选 / 取消选择" : "点开看完整结果")
+        .animation(IslandChrome.hoverFade, value: hovering)
+        .help(selecting ? "点一下选中或取消" : "点开看详情")
         .contextMenu {
             Button("打开", action: onTap)
             if let answer = run.resultSummary {
-                Button("拷贝结果") {
+                Button("拷贝回答") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(answer, forType: .string)
                 }
             }
             Divider()
-            Button("删除", role: .destructive, action: onDelete)
+            Button("删掉", role: .destructive, action: onDelete)
         }
     }
 }

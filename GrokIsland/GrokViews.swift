@@ -367,8 +367,9 @@ struct RunDetailView: View {
         }
     }
 
-    /// Just the time for today, with the date before that, so the header stays on one line.
-    private static func stamp(_ date: Date) -> String {
+    /// Just the time for today, with the date before that, so a run's header or journal row
+    /// stays on one line.
+    static func stamp(_ date: Date) -> String {
         if Calendar.current.isDateInToday(date) {
             return date.formatted(date: .omitted, time: .shortened)
         }
