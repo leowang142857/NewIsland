@@ -259,11 +259,11 @@ struct CursorSplitTaskOrchestrator: SplitTaskCollaborating {
     var pollInterval: Duration = .seconds(2)
     var timeout: TimeInterval = 20 * 60
 
-    static let plannerName = "grok岛 · 规划"
-    static let summaryName = "grok岛 · 汇总"
+    static let plannerName = "NewIsland · 规划"
+    static let summaryName = "NewIsland · 汇总"
 
     static func workerName(_ title: String) -> String {
-        "grok岛 · 子任务 · \(title)"
+        "NewIsland · 子任务 · \(title)"
     }
 
     func collaborate(

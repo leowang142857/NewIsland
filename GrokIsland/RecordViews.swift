@@ -45,19 +45,19 @@ struct RunJournalList: View {
             toolbar
             if let note {
                 Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(IslandChrome.electricGreen)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
                     .transition(.opacity)
             }
             if visibleRuns.isEmpty {
-                Text(filter == .grok ? "还没有 Grok 回答。点上面的功能条或「问 Grok」试试。" : "暂无运行记录")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text(filter == .grok ? "还没有 Grok 回答。" : "还没有运行记录。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, 4)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(visibleRuns) { run in
                             RunRow(
                                 run: run,
@@ -93,23 +93,25 @@ struct RunJournalList: View {
             if selecting {
                 Button(allVisibleSelected ? "全不选" : "全选", action: toggleAll)
                 Button("删除 \(selection.count)", action: deleteSelection)
-                    .foregroundStyle(selection.isEmpty ? Color.secondary : IslandChrome.alertRed)
+                    .foregroundStyle(selection.isEmpty ? Color.secondary : IslandChrome.danger)
                     .disabled(selection.isEmpty)
                 Button("完成") {
                     selecting = false
                     selection = []
                 }
+                .foregroundStyle(.primary)
             } else {
-                Button("清理已完成 \(finishedCount)", action: clearFinished)
+                Button("清理已完成", action: clearFinished)
                     .disabled(finishedCount == 0)
-                    .help("一键删除所有已完成 / 失败 / 已取消的记录")
+                    .help("删除所有已完成、失败、已取消的记录（\(finishedCount) 条）")
                 Button("选择") { selecting = true }
                     .disabled(engine.runs.isEmpty)
                     .help("多选后批量删除")
             }
         }
-        .buttonStyle(.borderless)
-        .font(.caption2)
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .font(.system(size: 11))
     }
 
     private func tap(_ run: RunRecord) {
@@ -179,40 +181,37 @@ private struct RunRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 8) {
             if selecting {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.caption)
-                    .foregroundStyle(selected ? IslandChrome.neonCyan : Color.secondary)
-                    .padding(.top, 1)
+                    .font(.system(size: 12))
+                    .foregroundStyle(selected ? IslandChrome.accent : Color.secondary)
             } else {
                 TaskLightDot(state: TaskLightBoard.state(for: run.phase), size: 6)
-                    .padding(.top, 2)
+                    .padding(.top, 3)
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(run.moduleName)
-                        .font(.caption.weight(.medium))
+                        .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                     Text(tag)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(IslandChrome.neonCyan)
-                        .padding(.horizontal, 4)
-                        .background(Capsule().fill(IslandChrome.neonCyan.opacity(0.12)))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
                     Spacer(minLength: 4)
                     Text(run.createdAt.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2.monospacedDigit())
+                        .font(.system(size: 10).monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
                 if let question = run.question {
-                    Text("问：\(question)")
-                        .font(.caption2)
+                    Text(question)
+                        .font(.system(size: 11))
                         .lineLimit(1)
                 }
                 Text(run.message)
-                    .font(.caption2)
-                    .foregroundStyle(run.phase == .failed ? IslandChrome.alertRed : Color.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(run.phase == .failed ? IslandChrome.danger : Color.secondary)
                     .lineLimit(2)
                 if run.phase == .running {
                     ProgressView(value: run.progress)
@@ -222,21 +221,21 @@ private struct RunRow: View {
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
-                    .font(.caption2)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
-            .opacity(selecting ? 0 : (hovering ? 1 : 0.35))
+            .buttonStyle(.plain)
+            .opacity(selecting ? 0 : (hovering ? 1 : 0))
             .disabled(selecting)
             .help(run.isActive ? "取消并删除这条记录" : "删除这条记录")
         }
-        .padding(6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 7)
         .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(selected ? IslandChrome.neonCyan.opacity(0.16) : Color.white.opacity(hovering ? 0.08 : 0.04))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(selected ? IslandChrome.neonCyan.opacity(0.7) : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(selected ? IslandChrome.accent.opacity(0.14) : Color.white.opacity(hovering ? 0.05 : 0))
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)

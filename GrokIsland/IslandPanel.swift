@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Borderless always-on-top panel, pinned to the top center of the preferred screen.
 ///
-/// Chrome (aurora glass, aurora edge) lives in the SwiftUI root.
+/// Chrome (ink glass, hairline edge) lives in the SwiftUI root.
 /// Proximity show / auto-retract is wired here.
 final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -78,8 +78,10 @@ final class IslandPresence: ObservableObject {
     @Published var isDropTargeted = false
     @Published var isHoveringPanel = false
 
-    func shouldHold(engine: IslandEngine) -> Bool {
-        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil || Self.systemPickerIsOpen
+    /// A drag out of the tray keeps the island up: its source row must outlive the drag.
+    func shouldHold(engine: IslandEngine, tray: FileTray) -> Bool {
+        isPinned || isDropTargeted || isHoveringPanel || engine.pendingLocal != nil
+            || tray.isDraggingOut || Self.systemPickerIsOpen
     }
 
     /// The file picker and color panel float outside the island. Retracting under them would
@@ -100,6 +102,7 @@ final class IslandPanelController {
 
     private let engine: IslandEngine
     private let settings: IslandSettings
+    private let tray: FileTray
     let presence = IslandPresence()
     private let panel: IslandPanel
     private var screenObserver: NSObjectProtocol?
@@ -111,10 +114,12 @@ final class IslandPanelController {
         engine: IslandEngine,
         monitor: CloudActivityMonitor,
         settings: IslandSettings,
-        deadlines: DeadlineStore
+        deadlines: DeadlineStore,
+        tray: FileTray
     ) {
         self.engine = engine
         self.settings = settings
+        self.tray = tray
         let screen = ScreenAnchor.preferredScreen()
         let frame = ScreenAnchor.topCenterFrame(size: Self.peekSize(on: screen), on: screen)
         panel = IslandPanel(contentRect: frame)
@@ -123,7 +128,8 @@ final class IslandPanelController {
             presence: presence,
             monitor: monitor,
             settings: settings,
-            deadlines: deadlines
+            deadlines: deadlines,
+            tray: tray
         )
         let host = FirstMouseHostingView(rootView: root)
         host.wantsLayer = true
@@ -166,8 +172,13 @@ final class IslandPanelController {
     }
 
     private func tick() {
+        // A drag that ends off the island (say, back on the desktop) never reaches a drop target
+        // to clear this, and the island would stay held open. A released button means it is over.
+        if presence.isDropTargeted, NSEvent.pressedMouseButtons & 1 == 0 {
+            presence.isDropTargeted = false
+        }
         if presence.isRevealed {
-            if mouseInHotZone() || presence.shouldHold(engine: engine) {
+            if mouseInHotZone() || presence.shouldHold(engine: engine, tray: tray) {
                 cancelRetract()
             } else {
                 scheduleRetract()
@@ -213,7 +224,7 @@ final class IslandPanelController {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.retractWork = nil
-            if !self.mouseInHotZone(), !self.presence.shouldHold(engine: self.engine) {
+            if !self.mouseInHotZone(), !self.presence.shouldHold(engine: self.engine, tray: self.tray) {
                 self.setRevealed(false)
             }
         }
@@ -289,6 +300,7 @@ struct IslandRootView: View {
     @ObservedObject var monitor: CloudActivityMonitor
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
+    let tray: FileTray
 
     var body: some View {
         ZStack {
@@ -298,7 +310,8 @@ struct IslandRootView: View {
                     presence: presence,
                     monitor: monitor,
                     settings: settings,
-                    deadlines: deadlines
+                    deadlines: deadlines,
+                    tray: tray
                 )
                 .transition(IslandChrome.revealTransition)
             } else {
@@ -309,7 +322,7 @@ struct IslandRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(IslandChrome.expandSpring, value: presence.isRevealed)
         .preferredColorScheme(.dark)
-        .tint(IslandChrome.neonCyan)
+        .tint(IslandChrome.accent)
         .onChange(of: engine.activeRunCount) { monitor.flash() }
     }
 }
@@ -324,13 +337,27 @@ struct PeekStripView: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var deadlines: DeadlineStore
 
+    /// Square on top so it meets the screen edge, rounded below like the camera housing.
+    private static let shape = UnevenRoundedRectangle(
+        bottomLeadingRadius: 10,
+        bottomTrailingRadius: 10,
+        style: .continuous
+    )
+
     var body: some View {
+        let emphasized = presence.isDropTargeted && !settings.isPeekLocked
         TimelineView(.periodic(from: .now, by: 5)) { context in
             content(now: context.date)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .islandChrome(Capsule(), glow: 0.8, emphasized: presence.isDropTargeted && !settings.isPeekLocked)
-        .islandFlash(Capsule(), trigger: monitor.flashCount)
+        .background(Self.shape.fill(Color.black))
+        .clipShape(Self.shape)
+        .overlay {
+            Self.shape
+                .strokeBorder(emphasized ? IslandChrome.accent : Color.clear, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .islandFlash(Self.shape, trigger: monitor.flashCount)
         .onHover { hovering in
             presence.isHoveringPanel = hovering
         }
@@ -351,8 +378,9 @@ struct PeekStripView: View {
             }
             .frame(width: PeekStrip.wingWidth)
 
-            Text("grok岛")
-                .font(.caption.weight(.semibold))
+            Text(IslandChrome.name)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
@@ -377,8 +405,7 @@ struct PeekStripView: View {
         } label: {
             Image(systemName: locked ? "lock.fill" : "lock.open")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(locked ? IslandChrome.amber : Color.secondary)
-                .shadow(color: IslandChrome.amber.opacity(locked ? 0.7 : 0), radius: 3)
+                .foregroundStyle(locked ? IslandChrome.caution : Color.white.opacity(0.35))
                 .frame(width: PeekStrip.lockZoneWidth, height: PeekStrip.height)
                 .contentShape(Rectangle())
         }

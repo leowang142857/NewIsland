@@ -280,7 +280,7 @@ struct CursorAgentGrokClient: GrokBotClient {
             modelID = credentials.modelID
         }
         let created = try await api.createAgent(
-            name: "grok岛 · \(request.module.displayName)",
+            name: "NewIsland · \(request.module.displayName)",
             prompt: prompt.text,
             images: prompt.images,
             modelID: modelID

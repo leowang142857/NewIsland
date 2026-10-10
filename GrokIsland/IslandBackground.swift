@@ -69,7 +69,8 @@ private extension IslandRGB {
 }
 
 enum IslandBackgroundKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case aurora
+    /// Raw value predates the ink surface; kept so saved preferences still decode.
+    case standard = "aurora"
     case solid
     case gradient
     case image
@@ -78,7 +79,7 @@ enum IslandBackgroundKind: String, Codable, CaseIterable, Identifiable, Sendable
 
     var title: String {
         switch self {
-        case .aurora: "默认"
+        case .standard: "默认"
         case .solid: "纯色"
         case .gradient: "渐变"
         case .image: "图片"
@@ -88,11 +89,11 @@ enum IslandBackgroundKind: String, Codable, CaseIterable, Identifiable, Sendable
 
 /// What sits behind the expanded island's content, on top of the frosted desktop blur.
 ///
-/// `.aurora` is the built-in cyber frosted-glass neon look and stays the default; the custom
-/// kinds are opt-in, and switching back keeps their colors and photo for next time.
+/// `.standard` is the built-in dark ink glass and stays the default; the custom kinds are
+/// opt-in, and switching back keeps their colors and photo for next time.
 ///
-/// Custom fills get a dark veil (`effectiveDim`) so white text and the neon chrome stay
-/// readable; bright colors raise the veil's floor no matter what the slider says.
+/// Custom fills get a dark veil (`effectiveDim`) so white text stays readable; bright colors
+/// raise the veil's floor no matter what the slider says.
 struct IslandBackgroundStyle: Codable, Equatable, Sendable {
     static let dimRange: ClosedRange<Double> = 0...0.8
     static let opacityRange: ClosedRange<Double> = 0.3...1
@@ -103,7 +104,7 @@ struct IslandBackgroundStyle: Codable, Equatable, Sendable {
     /// A photo can be bright anywhere, so it always gets at least this much veil.
     static let imageMinimumDim = 0.18
 
-    var kind: IslandBackgroundKind = .aurora
+    var kind: IslandBackgroundKind = .standard
     var solid: IslandRGB = Self.solidPresets[0].color
     var gradient: [IslandRGB] = Self.gradientPresets[0].colors
     /// Degrees clockwise from left → right; 90 runs top → bottom.
@@ -114,19 +115,19 @@ struct IslandBackgroundStyle: Codable, Equatable, Sendable {
     var dim: Double = 0.3
     /// Below 1 the frosted desktop blur shows through the custom fill.
     var opacity: Double = 0.92
-    /// How much of the animated aurora is screened over the custom fill.
-    var auroraOverlay: Double = 0.25
+    /// How much of the animated aurora is screened over the custom fill. Off unless asked for.
+    var auroraOverlay: Double = 0
 
     static let `default` = IslandBackgroundStyle()
 
     init() {}
 
-    var usesCustomFill: Bool { kind != .aurora }
+    var usesCustomFill: Bool { kind != .standard }
 
     /// Veil floor that keeps white caption text legible over this fill.
     var minimumDim: Double {
         switch kind {
-        case .aurora:
+        case .standard:
             return 0
         case .solid:
             return Self.dimFloor(forLuminance: solid.luminance * opacity)
@@ -157,7 +158,7 @@ struct IslandBackgroundStyle: Codable, Equatable, Sendable {
         copy.imageBlur = Self.clamp(imageBlur, Self.blurRange, fallback: 6)
         copy.dim = Self.clamp(dim, Self.dimRange, fallback: 0.3)
         copy.opacity = Self.clamp(opacity, Self.opacityRange, fallback: 0.92)
-        copy.auroraOverlay = Self.clamp(auroraOverlay, Self.auroraOverlayRange, fallback: 0.25)
+        copy.auroraOverlay = Self.clamp(auroraOverlay, Self.auroraOverlayRange, fallback: 0)
         if copy.gradient.count > Self.gradientStopRange.upperBound {
             copy.gradient = Array(copy.gradient.prefix(Self.gradientStopRange.upperBound))
         }
@@ -230,12 +231,12 @@ extension IslandBackgroundStyle {
     ]
 
     static let gradientPresets: [IslandGradientPreset] = [
-        IslandGradientPreset(title: "赛博霓虹", colors: [.literal("#0A0F2C"), .literal("#3B1C6E"), .literal("#00A8C0")]),
+        IslandGradientPreset(title: "雾蓝", colors: [.literal("#0F141E"), .literal("#1F2B40"), .literal("#3B5375")]),
         IslandGradientPreset(title: "深海", colors: [.literal("#020617"), .literal("#0B3B5C"), .literal("#0E7490")]),
         IslandGradientPreset(title: "暮光", colors: [.literal("#1E1B4B"), .literal("#7C2D6B"), .literal("#E0662A")]),
         IslandGradientPreset(title: "极夜", colors: [.literal("#050510"), .literal("#1A1446"), .literal("#2E6B5E")]),
         IslandGradientPreset(title: "樱花", colors: [.literal("#2B0A22"), .literal("#8E2F66"), .literal("#E59BBE")]),
-        IslandGradientPreset(title: "电光", colors: [.literal("#FF2E97"), .literal("#2EE6FF")])
+        IslandGradientPreset(title: "陶土", colors: [.literal("#1A1210"), .literal("#5A2E22"), .literal("#B0603E")])
     ]
 }
 

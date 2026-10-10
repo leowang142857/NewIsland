@@ -8,7 +8,7 @@ struct GrokIslandApp: App {
     var body: some Scene {
         Settings {
             VStack(alignment: .leading, spacing: 8) {
-                Text("grok岛")
+                Text("NewIsland")
                     .font(.title3.weight(.semibold))
                 Text("The island panel is the main UI. This settings pane is a stub.")
                     .foregroundStyle(.secondary)
@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }()
     lazy var monitor = CloudActivityMonitor(storage: settings.storage)
+    let tray = FileTray()
     private var panelController: IslandPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -48,7 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine: engine,
             monitor: monitor,
             settings: settings,
-            deadlines: deadlines
+            deadlines: deadlines,
+            tray: tray
         )
         panelController?.show()
         monitor.start()
