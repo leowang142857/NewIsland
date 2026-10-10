@@ -65,8 +65,9 @@ final class IslandShellGeometryTests: XCTestCase {
         XCTAssertEqual(narrow.width, 800 - 2 * IslandShell.sideMargin)
         XCTAssertEqual(narrow.height, IslandShell.idealHeight)
         XCTAssertEqual(IslandShell.size(screenWidth: 500, room: 2000).width, IslandShell.minimumWidth)
-        XCTAssertEqual(IslandShell.size(screenWidth: 1470, room: 280.6).height, 268, "lands on whole points")
+        XCTAssertEqual(IslandShell.size(screenWidth: 1470, room: 290.6).height, 278, "lands on whole points")
         XCTAssertEqual(IslandShell.size(screenWidth: 1470, room: 100).height, IslandShell.minimumHeight)
+        XCTAssertGreaterThan(IslandShell.minimumHeight, 62 + 208, "header, padding, and the home's left column")
     }
 }
 

@@ -58,9 +58,10 @@ enum IslandShell {
     static let idealHeight: CGFloat = 300
     /// Width over height when the screen has the room.
     static let aspect: CGFloat = 3
-    /// Floors on very small or heavily scaled displays, so the two columns never squeeze shut.
+    /// Floors on very small or heavily scaled displays, so the two columns never squeeze shut:
+    /// at 272 pt the home's left column (DDL, shortcut tiles, both fields) still shows whole.
     static let minimumWidth: CGFloat = 720
-    static let minimumHeight: CGFloat = 240
+    static let minimumHeight: CGFloat = 272
     /// Kept clear of the screen's left and right edges.
     static let sideMargin: CGFloat = 16
     /// Kept clear above the Dock, or the bottom of the screen when the Dock hides.
