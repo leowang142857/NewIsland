@@ -98,7 +98,9 @@ struct ShellView: View {
             }
         }
         .padding(IslandChrome.padding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Both bounds, so the column is always exactly the panel's size. If the layers outgrow a
+        // short column (an open DDL card at 1024×665), the bottom clips and the header stays put.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .islandChrome(
             Self.shape,
             glow: 0.85,
