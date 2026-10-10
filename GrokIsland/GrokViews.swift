@@ -22,6 +22,7 @@ struct GrokQuickBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Fixed vertically so a two-line custom title grows all three tiles together.
             HStack(spacing: 6) {
                 ForEach(shortcuts.indices, id: \.self) { index in
                     ShortcutButton(
@@ -33,6 +34,7 @@ struct GrokQuickBar: View {
                     }
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 6) {
                 inputRow(
@@ -213,12 +215,14 @@ private struct ShortcutButton: View {
                 .frame(height: 18)
                 Text(shortcut.title)
                     .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
             }
             .foregroundStyle(.primary)
             .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, minHeight: 54)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 54, maxHeight: .infinity)
             .background(shape.fill(lit ? IslandChrome.surfaceRaised : IslandChrome.surface))
             .overlay {
                 shape

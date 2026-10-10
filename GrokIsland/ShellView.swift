@@ -156,8 +156,10 @@ struct ShellView: View {
 
     // MARK: - Header
 
+    /// Sized for the 240 pt column: the name, a status like "Agent 3 · PR 12", and the two glyph
+    /// buttons come to about 232 pt at this spacing. Longer statuses truncate.
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             if case .home = route {
                 Button {
                     route = .activity
@@ -195,7 +197,7 @@ struct ShellView: View {
                 .help("回到主页")
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
 
             headerStatus
 
