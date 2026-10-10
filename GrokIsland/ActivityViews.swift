@@ -83,8 +83,8 @@ struct TaskLightStrip: View {
     }
 }
 
-/// Expanded status layer: one capsule per run / Cloud Agent / PR, like a row of Live
-/// Activities. Tap to open it. The idle dot sits where the first chip's dot would.
+/// The header's status lights: one capsule per run / Cloud Agent / PR, like a row of Live
+/// Activities. Tap to open it. Idle, a quiet line of text; the name beside it already has the dot.
 struct TaskLightRail: View {
     let lights: [TaskLight]
     let onSelect: (TaskLight) -> Void
@@ -93,15 +93,11 @@ struct TaskLightRail: View {
 
     var body: some View {
         if lights.isEmpty {
-            HStack(spacing: 5) {
-                ActivityLight(busy: false, size: 6)
-                Text("现在没有任务在跑")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: Self.height)
+            Text("现在没有任务在跑")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: Self.height, alignment: .leading)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {

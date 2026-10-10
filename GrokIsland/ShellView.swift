@@ -4,8 +4,10 @@ import UniformTypeIdentifiers
 
 /// Expanded island on the aurora glass. Calls `IslandEngine` only.
 ///
-/// Home is layered top → bottom: per-task status lights → DDL energy bar → Grok shortcuts and
-/// fields → modules / tray / records under one segmented control. Detail screens sit one level deeper.
+/// A wide, short panel. The header row carries the name, one light per task, and the status.
+/// Home splits in two: what's happening now on the left (the DDL energy bar, then Grok shortcuts
+/// and fields), modules / tray / records under one segmented control on the right. Detail screens
+/// sit one level deeper and keep the same left / right split where they have two parts.
 struct ShellView: View {
     @ObservedObject var engine: IslandEngine
     @ObservedObject var presence: IslandPresence
@@ -71,25 +73,12 @@ struct ShellView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            switch route {
-            case .home:
-                home
-            case .editor(let id):
-                editor(editingID: id)
-            case .run(let id):
-                if let run = engine.runs.first(where: { $0.id == id }) {
-                    RunDetailView(run: run, engine: engine) {
-                        route = .home
-                        homeTab = .records
-                    }
-                } else {
-                    home
-                }
-            case .activity:
-                ActivityListView(monitor: monitor) { route = .settings }
-            case .settings:
-                SettingsPane(settings: settings, monitor: monitor, engine: engine)
-            }
+            page
+                // Both bounds: the page gets what the header, a confirmation, and an error leave,
+                // so those always show. Whatever outgrows it (an open DDL card pushing Grok down)
+                // clips at the bottom instead of growing the island.
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
             if engine.pendingLocal != nil {
                 localConfirm
             }
@@ -98,8 +87,7 @@ struct ShellView: View {
             }
         }
         .padding(IslandChrome.padding)
-        // Both bounds, so the column is always exactly the panel's size. If the layers outgrow a
-        // short column (an open DDL card at 1024×665), the bottom clips and the header stays put.
+        // Both bounds, so the island is always exactly the panel's size.
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .islandChrome(
             Self.shape,
@@ -158,8 +146,8 @@ struct ShellView: View {
 
     // MARK: - Header
 
-    /// Sized for the 240 pt column: the name, a status like "Agent 3 · PR 12", and the two glyph
-    /// buttons come to about 232 pt at this spacing. Longer statuses truncate.
+    /// One row across the island: the name, then on home one light per task (they scroll sideways
+    /// when there are more than fit), what's running or the time, settings, and the pin.
     private var header: some View {
         HStack(spacing: 6) {
             if case .home = route {
@@ -179,6 +167,15 @@ struct ShellView: View {
                 }
                 .buttonStyle(.islandPress)
                 .help(activityHelp)
+
+                TimelineView(.periodic(from: .now, by: 5)) { context in
+                    TaskLightRail(
+                        lights: TaskLightBoard.lights(runs: engine.runs, snapshot: monitor.snapshot, now: context.date),
+                        onSelect: openLight
+                    )
+                }
+                .padding(.leading, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Button {
                     route = .home
@@ -197,9 +194,9 @@ struct ShellView: View {
                 }
                 .buttonStyle(.islandPress)
                 .help("回到主页")
-            }
 
-            Spacer(minLength: 2)
+                Spacer(minLength: 2)
+            }
 
             headerStatus
 
@@ -288,17 +285,48 @@ struct ShellView: View {
         return "Cloud Agent \(snapshot.agents.count) · PR \(snapshot.pullRequests.count) · 本机 \(engine.activeRunCount)"
     }
 
+    // MARK: - Pages
+
+    @ViewBuilder
+    private var page: some View {
+        switch route {
+        case .home:
+            home
+        case .editor(let id):
+            editor(editingID: id)
+        case .run(let id):
+            if let run = engine.runs.first(where: { $0.id == id }) {
+                RunDetailView(run: run, engine: engine) {
+                    route = .home
+                    homeTab = .records
+                }
+            } else {
+                home
+            }
+        case .activity:
+            ActivityListView(monitor: monitor) { route = .settings }
+        case .settings:
+            SettingsPane(settings: settings, monitor: monitor, engine: engine)
+        }
+    }
+
     // MARK: - Home layers
 
     private var home: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TimelineView(.periodic(from: .now, by: 5)) { context in
-                TaskLightRail(
-                    lights: TaskLightBoard.lights(runs: engine.runs, snapshot: monitor.snapshot, now: context.date),
-                    onSelect: openLight
-                )
-            }
+        HStack(alignment: .top, spacing: IslandChrome.columnGap) {
+            nowColumn
+                .frame(width: IslandChrome.leadingColumnWidth)
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+            IslandHairline(axis: .vertical)
+            layerColumn
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
 
+    /// The next DDL, then Grok. While the DDL card is open it pushes Grok down out of view, and
+    /// Grok comes back as soon as the card closes.
+    private var nowColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
             DeadlineEnergyBar(store: deadlines) { error in
                 engine.reportError(error)
             }
@@ -307,9 +335,12 @@ struct ShellView: View {
                 GrokQuickBar(engine: engine, settings: settings) { id in route = .run(id) }
                 lastAnswerStrip
             }
+        }
+    }
 
-            IslandHairline()
-            layerTabs
+    private var layerColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            layerBar
 
             switch homeTab {
             case .modules:
@@ -318,6 +349,38 @@ struct ShellView: View {
                 FileTrayLayer(tray: tray, dragActive: $trayDragActive)
             case .records:
                 RunJournalList(engine: engine) { id in route = .run(id) }
+            }
+        }
+    }
+
+    /// The segmented control at a comfortable width, not stretched across the column. Beside it,
+    /// on 模块, the drop hint, or where a drag is about to go, using the rest of the row.
+    private var layerBar: some View {
+        HStack(spacing: 12) {
+            layerTabs
+                .frame(maxWidth: 270)
+                .layoutPriority(1)
+            if homeTab == .modules {
+                moduleStatus
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
+        .animation(IslandChrome.expandSpring, value: isDragging)
+    }
+
+    @ViewBuilder
+    private var moduleStatus: some View {
+        if isDragging || dropMissNote != nil {
+            dropBanner
+                .transition(.opacity)
+        } else if !engine.modules.isEmpty {
+            // Left out, rather than cut off, when the island is too narrow for it.
+            ViewThatFits(in: .horizontal) {
+                Text("把文件或链接拖到模块上，就开始处理")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                Color.clear.frame(width: 0, height: 0)
             }
         }
     }
@@ -395,18 +458,14 @@ struct ShellView: View {
         withAnimation(IslandChrome.selectSpring) { homeTab = .tray }
     }
 
+    /// Two rows of tiles at the full-size island; past that the grid scrolls.
     private var moduleLayer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isDragging || dropMissNote != nil {
-                dropBanner
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
             if engine.modules.isEmpty {
                 emptyModules
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
                         ForEach(engine.modules) { module in
                             ModuleTile(
                                 module: module,
@@ -426,11 +485,6 @@ struct ShellView: View {
             if isReceivingFiles {
                 TrayDropSlot(tray: tray, targeted: $traySlotTargeted, onDropped: showTray)
                     .transition(.opacity)
-            } else if !engine.modules.isEmpty {
-                Text("把文件或链接拖到模块上，就开始处理")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 4)
             }
         }
         .animation(IslandChrome.expandSpring, value: isDragging)

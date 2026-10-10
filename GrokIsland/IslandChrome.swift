@@ -3,8 +3,8 @@ import ImageIO
 import SwiftUI
 
 /// Shared chrome for the floating island, after macOS Control Center rather than a dashboard:
-/// one dark frosted column, soft platters a step lighter than it, capsule controls, and corners
-/// that nest (the column's 24 pt around 12 pt platters, 12 pt in from its edge).
+/// one dark frosted panel, soft platters a step lighter than it, capsule controls, and corners
+/// that nest (the panel's 24 pt around 12 pt platters, 12 pt in from its edge).
 ///
 /// Color carries meaning only. `accent` marks the one thing you're interacting with; green,
 /// amber, orange, and red are task states. Everything else is white at some opacity.
@@ -27,7 +27,7 @@ enum IslandChrome {
     static let thumb = Color.white.opacity(0.17)
     static let hairline = Color.white.opacity(0.10)
     static let edge = Color.white.opacity(0.11)
-    /// Column rim: light from above, fading toward the bottom.
+    /// Panel rim: light from above, fading toward the bottom.
     static let rim = LinearGradient(
         colors: [Color.white.opacity(0.16), Color.white.opacity(0.06)],
         startPoint: .top,
@@ -35,8 +35,13 @@ enum IslandChrome {
     )
 
     static let cornerRadius: CGFloat = 24
-    /// Column edge to content. Platter corners nest inside it.
+    /// Panel edge to content. Platter corners nest inside it.
     static let padding: CGFloat = 12
+    /// The wide island's left column: home's DDL and Grok, a run's question, the editor's fields.
+    /// Wide enough for three shortcut tiles and the Grok placeholders in full.
+    static let leadingColumnWidth: CGFloat = 280
+    /// Either side of the hairline between the two columns.
+    static let columnGap: CGFloat = 14
     static let platterRadius: CGFloat = 12
     static let fieldRadius: CGFloat = 8
     /// Smallest click target for a toolbar glyph.
@@ -52,14 +57,17 @@ enum IslandChrome {
     static let revealTransition: AnyTransition = .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
 }
 
-/// One-pixel divider between the island's layers.
+/// One-pixel divider between rows, or between the island's two columns when vertical.
 struct IslandHairline: View {
+    var axis: Axis = .horizontal
+
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
+        let thickness = 1 / max(displayScale, 1)
         Rectangle()
             .fill(IslandChrome.hairline)
-            .frame(height: 1 / max(displayScale, 1))
+            .frame(width: axis == .vertical ? thickness : nil, height: axis == .horizontal ? thickness : nil)
             .allowsHitTesting(false)
     }
 }
@@ -108,7 +116,7 @@ extension View {
             }
     }
 
-    /// A Control Center–style module: a soft rounded fill one step lighter than the column.
+    /// A Control Center–style module: a soft rounded fill one step lighter than the panel.
     /// `tint` washes it in a state color, for a confirmation or a problem.
     func islandPlatter(inset: CGFloat = 10, raised: Bool = false, tint: Color? = nil) -> some View {
         let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
@@ -359,8 +367,8 @@ struct IslandSegment: View {
     }
 }
 
-/// The collapsed strip's outline: the top flares into the screen edge and the bottom rounds off
-/// like the camera housing, so the wings read as part of the notch.
+/// The collapsed strip's outline: the top flares into the bottom of the menu bar and the bottom
+/// rounds off like the camera housing, so the strip reads as part of the notch.
 struct NotchShape: InsettableShape {
     var flare: CGFloat = 6
     var bottomRadius: CGFloat = 10

@@ -91,7 +91,7 @@ struct DeadlineBadge: View {
     }
 }
 
-/// One DDL energy strip above the function strips. Each task is one cell in that bar.
+/// One DDL energy strip above the Grok shortcuts. Each task is one cell in that bar.
 /// Hovering (or typing into it) expands the list and the add / edit field.
 ///
 /// The time control is the last row. A click or drag that slips a few points below
@@ -111,7 +111,8 @@ struct DeadlineEnergyBar: View {
     @State private var parsedHint: String?
     @FocusState private var fieldFocused: Bool
 
-    private static let visibleRows = 4
+    /// Three rows, the composer, and 清掉已完成 still fit the wide island's left column.
+    private static let visibleRows = 3
 
     private var expanded: Bool {
         DeadlineTimeHit.staysOpen(
