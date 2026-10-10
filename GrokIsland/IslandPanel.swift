@@ -95,8 +95,6 @@ final class IslandPresence: ObservableObject {
 final class IslandPanelController {
     /// Lock + per-task lights on the left, the name, and the next DDL on the right.
     static let defaultPeekSize = CGSize(width: PeekStrip.defaultWidth, height: PeekStrip.height)
-    /// Status lights, DDL bar, function strips, and the module grid stacked in layers.
-    static let shellSize = CGSize(width: 340, height: 520)
     static let retractDelay: TimeInterval = 0.55
     static let pollInterval: TimeInterval = 0.08
 
@@ -244,7 +242,7 @@ final class IslandPanelController {
         } else {
             screen = ScreenAnchor.preferredScreen()
         }
-        let size = presence.isRevealed ? Self.shellSize : Self.peekSize(on: screen)
+        let size = presence.isRevealed ? Self.shellSize(on: screen) : Self.peekSize(on: screen)
         // Expanded: drop below the webcam/notch so the top-row middle stays readable.
         let next = ScreenAnchor.topCenterFrame(size: size, on: screen, clearsNotch: presence.isRevealed)
         guard panel.frame != next else { return }
@@ -262,13 +260,23 @@ final class IslandPanelController {
         }
     }
 
-    /// Hugs the camera housing: one short wing each side of the notch for the lights and DDL badge.
+    /// A tall column under the notch, as much of `IslandShell`'s 1 : 3 as the screen allows.
+    static func shellSize(on screen: NSScreen) -> CGSize {
+        IslandShell.size(room: ScreenAnchor.expandedTopY(on: screen) - screen.visibleFrame.minY)
+    }
+
+    /// Hugs the camera housing: one short wing each side of the notch, as tall as the notch itself.
     static func peekSize(on screen: NSScreen) -> CGSize {
-        var notch: CGFloat?
+        var notchWidth: CGFloat?
+        var notchHeight: CGFloat?
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            notch = screen.frame.width - left.width - right.width
+            notchWidth = screen.frame.width - left.width - right.width
+            notchHeight = screen.safeAreaInsets.top
         }
-        return CGSize(width: PeekStrip.width(notchWidth: notch), height: PeekStrip.height)
+        return CGSize(
+            width: PeekStrip.width(notchWidth: notchWidth),
+            height: PeekStrip.height(notchHeight: notchHeight)
+        )
     }
 
     /// Uses `NSEvent.mouseLocation` (no Accessibility / Input Monitoring).

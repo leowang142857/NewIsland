@@ -36,6 +36,46 @@ final class PeekStripGeometryTests: XCTestCase {
         XCTAssertFalse(PeekStrip.isOnLock(mouseX: 100 + PeekStrip.lockZoneWidth, stripMinX: 100))
         XCTAssertFalse(PeekStrip.isOnLock(mouseX: 99, stripMinX: 100))
     }
+
+    func testStripIsAsTallAsTheNotch() {
+        XCTAssertEqual(PeekStrip.height(notchHeight: nil), PeekStrip.height)
+        XCTAssertEqual(PeekStrip.height(notchHeight: 0), PeekStrip.height)
+        XCTAssertEqual(PeekStrip.height(notchHeight: 32), 32, "lines up with the camera housing")
+        XCTAssertEqual(PeekStrip.height(notchHeight: 38), 38, "a taller housing at another display scale")
+        XCTAssertEqual(PeekStrip.height(notchHeight: 12), PeekStrip.height, "never thinner than the plain strip")
+        XCTAssertEqual(PeekStrip.height(notchHeight: 90), PeekStrip.maxHeight, "an odd inset never turns it into a slab")
+    }
+}
+
+final class IslandShellGeometryTests: XCTestCase {
+    func testRoomyScreenGetsAColumnThreeTimesAsTallAsWide() {
+        let size = IslandShell.size(room: 2000)
+        XCTAssertEqual(size.width, IslandShell.width)
+        XCTAssertEqual(size.height, IslandShell.idealHeight)
+        XCTAssertEqual(size.height / size.width, 3, accuracy: 0.01)
+        XCTAssertLessThan(size.width, 340, "narrower than the old 340 x 520 card")
+    }
+
+    func testFullColumnFitsUnderTheNotchOfA13InchMacBookAir() {
+        // 1470 x 956 pt by default, camera housing about 32 pt, 6 pt gap under it.
+        let room: CGFloat = 956 - 32 - 6
+        let size = IslandShell.size(room: room)
+        XCTAssertLessThanOrEqual(size.height, room - IslandShell.bottomMargin)
+        XCTAssertEqual(size.height / size.width, 3, accuracy: 0.01)
+    }
+
+    func testShortScreenShortensTheColumnDownToAFloor() {
+        // "Larger Text" on the same Air: 1280 x 832 pt.
+        let room: CGFloat = 832 - 32 - 6
+        let tight = IslandShell.size(room: room)
+        XCTAssertEqual(tight.height, room - IslandShell.bottomMargin)
+        XCTAssertGreaterThan(tight.height / tight.width, 2.5, "still clearly a vertical strip")
+        XCTAssertEqual(IslandShell.size(room: 300).height, IslandShell.minimumHeight)
+    }
+
+    func testHeightLandsOnWholePoints() {
+        XCTAssertEqual(IslandShell.size(room: 700.6).height, 688)
+    }
 }
 
 final class PeekStripRevealTests: XCTestCase {
