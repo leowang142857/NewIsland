@@ -145,7 +145,7 @@ struct DeadlineEnergyBar: View {
 
     private func card(now: Date) -> some View {
         let summary = store.summary(now: now)
-        let shape = RoundedRectangle(cornerRadius: IslandChrome.innerRadius + 1, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
         return VStack(alignment: .leading, spacing: 8) {
             summaryRow(summary, now: now)
             if expanded {
@@ -154,9 +154,14 @@ struct DeadlineEnergyBar: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 9)
         .background {
             shape.fill(expanded ? IslandChrome.surfaceRaised : IslandChrome.surface)
+        }
+        .overlay {
+            shape
+                .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
+                .allowsHitTesting(false)
         }
         .contentShape(shape)
     }
@@ -179,10 +184,10 @@ struct DeadlineEnergyBar: View {
                         Text("共 \(summary.pendingCount)")
                             .font(.system(size: 10).monospacedDigit())
                             .foregroundStyle(.tertiary)
-                            .help("共 \(summary.pendingCount) 条未完成 · 7 天内 \(summary.withinWeekCount) 条 · 超时 \(summary.overdueCount) 条")
+                            .help("还有 \(summary.pendingCount) 条没做完 · 7 天内 \(summary.withinWeekCount) 条 · 已经过了 \(summary.overdueCount) 条")
                     }
                 } else {
-                    Text("没有 DDL，移过来添加")
+                    Text("还没有 DDL · 移过来加一条")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
@@ -198,9 +203,10 @@ struct DeadlineEnergyBar: View {
         let pending = store.pending
         VStack(alignment: .leading, spacing: 2) {
             if pending.isEmpty {
-                Text("直接写「周五 18:00 交实验报告」，时间会自动识别。")
+                Text("像「周五 18:00 交实验报告」这样写就行，时间会自动填好。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(pending.prefix(Self.visibleRows)) { item in
                     DeadlineRow(
@@ -221,11 +227,12 @@ struct DeadlineEnergyBar: View {
             }
             composer
             if store.items.contains(where: \.isDone) {
-                Button("清除已完成") { _ = store.clearDone() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("清掉已完成") { _ = store.clearDone() }
+                        .buttonStyle(.islandPill(.quiet, compact: true))
+                }
+                .padding(.top, 2)
             }
         }
     }
@@ -233,12 +240,12 @@ struct DeadlineEnergyBar: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                TextField(editingID == nil ? "周五 18:00 交实验报告" : "修改内容", text: $draft)
+                TextField(editingID == nil ? "周五 18:00 交实验报告" : "改成什么", text: $draft)
                     .focused($fieldFocused)
                     .onSubmit(commit)
                     .islandField()
                 Button(editingID == nil ? "添加" : "保存", action: commit)
-                    .controlSize(.small)
+                    .buttonStyle(.islandPill(.prominent, compact: true))
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             HStack(spacing: 4) {
@@ -259,14 +266,12 @@ struct DeadlineEnergyBar: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .help("从输入里识别出的时间")
+                        .help("从你写的字里认出来的时间")
                 }
                 Spacer(minLength: 0)
                 if editingID != nil || !draft.isEmpty {
                     Button("取消", action: resetDraft)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.islandPill(.quiet, compact: true))
                 }
             }
         }
@@ -336,15 +341,16 @@ private struct DeadlineRow: View {
 
     var body: some View {
         let urgency = item.urgency(now: now)
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Button(action: onDone) {
                 Circle()
                     .strokeBorder(urgency.needsAttention ? urgency.color : Color.white.opacity(0.35), lineWidth: 1.2)
-                    .frame(width: 11, height: 11)
-                    .contentShape(Circle())
+                    .frame(width: 12, height: 12)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .help("标记完成")
+            .buttonStyle(.islandPress)
+            .help("做完了就点一下")
 
             HStack(spacing: 4) {
                 Text(item.title)
@@ -357,25 +363,23 @@ private struct DeadlineRow: View {
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onEdit)
-            .help("\(DeadlineFormat.countdown(item.remaining(now: now))) · 点击修改")
+            .help("\(DeadlineFormat.countdown(item.remaining(now: now))) · 点一下修改")
 
             Button(action: onDelete) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14, height: 14)
-                    .contentShape(Rectangle())
+                    .font(.system(size: 9, weight: .bold))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IslandIconButtonStyle(size: 18))
             .opacity(hovering || isEditing ? 1 : 0)
-            .help("删除这条 DDL")
+            .help("删掉这条 DDL")
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 3)
         .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isEditing ? Color.white.opacity(0.08) : (hovering ? Color.white.opacity(0.04) : Color.clear))
+            RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous)
+                .fill(isEditing ? IslandChrome.surfaceRaised : (hovering ? IslandChrome.surface : Color.clear))
         }
+        .animation(IslandChrome.hoverFade, value: hovering)
         .onHover { hovering = $0 }
     }
 }
