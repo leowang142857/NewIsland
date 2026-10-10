@@ -64,8 +64,8 @@ enum ExecutorKind: String, Codable, CaseIterable, Identifiable, Hashable, Sendab
 
     var title: String {
         switch self {
-        case .grokBot: "Grok Bot"
-        case .local: "Local"
+        case .grokBot: "Grok"
+        case .local: "本机"
         }
     }
 }
