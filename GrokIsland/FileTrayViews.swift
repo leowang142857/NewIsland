@@ -19,6 +19,7 @@ struct FileTrayLayer: View {
     @State private var pendingDelete: [String]?
     @State private var renameDraft = ""
     @State private var folderOptions: [TrayFolderOption] = []
+    @State private var menuHovering = false
 
     private var listTargeted: Bool { backgroundTargeted || fileRowTargeted }
     private var isReceiving: Bool { listTargeted || folderTarget != nil || crumbTarget != nil }
@@ -29,10 +30,11 @@ struct FileTrayLayer: View {
             statusLine
             list
             if !isReceiving, !tray.isDraggingOut, !tray.entries.isEmpty {
-                Text("拖出岛外就拿回去 · 拖到文件夹上归类 · ⌘ / ⇧ 多选")
+                Text("拖出岛外就拿回去 · ⌘ / ⇧ 多选")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                    .padding(.horizontal, 4)
             }
         }
         .onDrop(of: TrayDrop.types, delegate: TrayDropTarget(
@@ -74,7 +76,7 @@ struct FileTrayLayer: View {
             }
         }
         .font(.system(size: 11))
-        .frame(height: 20)
+        .frame(height: 24)
     }
 
     @ViewBuilder
@@ -83,6 +85,7 @@ struct FileTrayLayer: View {
             Text(tray.entries.isEmpty ? "还没放东西" : "\(tray.entries.count) 项")
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
+                .padding(.leading, 4)
         } else {
             let trail = TrayPath.trail(to: tray.folder)
             let collapsed = trail.count > 3
@@ -93,11 +96,8 @@ struct FileTrayLayer: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 16, height: 18)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .buttonStyle(IslandIconButtonStyle(size: 22))
                 .help("回到上一层")
 
                 ForEach(Array(shown.enumerated()), id: \.element) { index, path in
@@ -129,11 +129,8 @@ struct FileTrayLayer: View {
             } label: {
                 Image(systemName: "folder.badge.plus")
                     .font(.system(size: 11, weight: .medium))
-                    .frame(width: 22, height: 20)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .buttonStyle(IslandIconButtonStyle(size: 24))
             .help("新建文件夹")
 
             Menu {
@@ -149,27 +146,31 @@ struct FileTrayLayer: View {
                 }
                 Button("在 Finder 中显示") { revealCurrentFolder() }
             } label: {
+                // Menus don't take custom button styles, so the round hover fill is drawn here.
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11, weight: .medium))
-                    .frame(width: 22, height: 20)
-                    .contentShape(Rectangle())
+                    .foregroundStyle(menuHovering ? Color.primary : Color.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(menuHovering ? IslandChrome.surfaceRaised : Color.clear))
+                    .contentShape(Circle())
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
-            .foregroundStyle(.secondary)
+            .onHover { menuHovering = $0 }
+            .animation(IslandChrome.hoverFade, value: menuHovering)
             .help("拖进来的方式 · 在 Finder 中显示")
         }
     }
 
     private var selectionActions: some View {
         let selected = tray.selectedPaths
-        return HStack(spacing: 10) {
+        return HStack(spacing: 6) {
             Text("已选 \(selected.count)")
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
-            Menu("移到…") {
+            Menu {
                 Button("归入新文件夹") { tray.groupIntoNewFolder(selected) }
                 Divider()
                 ForEach(folderOptions, id: \.path) { option in
@@ -178,25 +179,31 @@ struct FileTrayLayer: View {
                     }
                     .disabled(!TrayPath.canMove(selected, into: option.path))
                 }
+            } label: {
+                Text("移到…")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 9)
+                    .frame(height: 22)
+                    .background(Capsule(style: .continuous).fill(IslandChrome.surface))
+                    .contentShape(Capsule(style: .continuous))
             }
             .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
             Button("删除") { pendingDelete = selected }
-                .foregroundStyle(IslandChrome.danger)
+                .buttonStyle(.islandPill(.destructive, compact: true))
                 .help("移到废纸篓，可以放回")
             Button {
                 tray.selection.clear()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 14, height: 18)
-                    .contentShape(Rectangle())
+                    .font(.system(size: 9, weight: .bold))
             }
+            .buttonStyle(IslandIconButtonStyle(size: 22))
             .help("取消选择")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
     }
 
     // MARK: - Status line
@@ -216,68 +223,71 @@ struct FileTrayLayer: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, 4)
                 .transition(.opacity)
         }
     }
 
+    /// Where the drop lands on the first line, and how (move or copy) under it: one line would
+    /// cut the hint off in the 240 pt column.
     private var dropBanner: some View {
         let target = folderTarget ?? crumbTarget
         let internalDrag = tray.isDraggingOut
-        return HStack(spacing: 6) {
-            if internalDrag && target == nil {
-                Text("拖到文件夹上归类，拖出岛外就拿回去")
-                    .foregroundStyle(.secondary)
-            } else {
+        let aimed = !(internalDrag && target == nil)
+        return VStack(alignment: .leading, spacing: 2) {
+            if aimed {
                 Text("松手放进「\(TrayPath.title(of: target ?? tray.folder))」")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(IslandChrome.accent)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if !internalDrag {
                     Text(tray.dropMode == .move ? "从原处移过来 · 按住 ⌥ 拷贝" : "拷贝一份 · 按住 ⌥ 改为移动")
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+            } else {
+                Text("拖到文件夹上归类，拖出岛外就拿回去")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 0)
         }
-        .font(.system(size: 11, weight: .medium))
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: IslandChrome.innerRadius, style: .continuous)
-                .fill(IslandChrome.surface)
+            RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
+                .fill(aimed ? IslandChrome.accent.opacity(0.12) : IslandChrome.surface)
         }
     }
 
     private func deleteConfirm(_ paths: [String]) -> some View {
-        HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(paths.count == 1 ? "把「\(TrayPath.name(of: paths[0]))」移到废纸篓？" : "把 \(paths.count) 项移到废纸篓？")
-                .lineLimit(1)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(2)
                 .truncationMode(.middle)
-            Spacer(minLength: 0)
-            Button("取消") { pendingDelete = nil }
-                .foregroundStyle(.secondary)
-            Button("移到废纸篓") {
-                tray.delete(paths)
-                pendingDelete = nil
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Button("取消") { pendingDelete = nil }
+                    .buttonStyle(.islandPill(compact: true))
+                Button("移到废纸篓") {
+                    tray.delete(paths)
+                    pendingDelete = nil
+                }
+                .buttonStyle(.islandPill(.destructive, compact: true))
             }
-            .foregroundStyle(IslandChrome.danger)
         }
-        .buttonStyle(.plain)
-        .font(.system(size: 11, weight: .medium))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background {
-            RoundedRectangle(cornerRadius: IslandChrome.innerRadius, style: .continuous)
-                .fill(IslandChrome.danger.opacity(0.10))
-        }
+        .islandPlatter(inset: 10, tint: IslandChrome.danger)
     }
 
     // MARK: - List
 
     private var list: some View {
-        let shape = RoundedRectangle(cornerRadius: IslandChrome.innerRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
         return Group {
             if tray.entries.isEmpty {
                 emptyState
@@ -336,17 +346,15 @@ struct FileTrayLayer: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(tray.folder.isEmpty ? "暂存区是空的" : "这个文件夹是空的")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .semibold))
             Text(tray.folder.isEmpty
                  ? "把桌面或 Finder 里的文件拖进来先放着，在这里分好文件夹；要用的时候拖回桌面就拿回去了。"
                  : "从 Finder 拖进来，或者回上一层把文件拖到这个文件夹上。")
                 .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 6)
-        .padding(.top, 6)
+        .islandPlatter(inset: 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -531,7 +539,7 @@ private struct TrayRowView: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous)
         HStack(spacing: 8) {
             TrayItemIcon(entry: entry, url: url, highlighted: targeted)
                 .frame(width: 16, height: 16)
@@ -563,8 +571,8 @@ private struct TrayRowView: View {
                 }
             }
         }
-        .padding(.horizontal, 6)
-        .frame(height: 26)
+        .padding(.horizontal, 8)
+        .frame(height: 28)
         .background(shape.fill(fill))
         .overlay {
             shape
@@ -578,12 +586,13 @@ private struct TrayRowView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.12), value: targeted)
+        .animation(IslandChrome.hoverFade, value: targeted)
+        .animation(IslandChrome.hoverFade, value: hovering)
     }
 
     private var fill: Color {
-        if targeted || selected { return IslandChrome.accent.opacity(0.14) }
-        return hovering ? Color.white.opacity(0.05) : Color.clear
+        if targeted || selected { return IslandChrome.accent.opacity(0.16) }
+        return hovering ? IslandChrome.surface : Color.clear
     }
 
     private var meta: String {
@@ -634,21 +643,24 @@ private struct TrayCrumb: View {
     let targeted: Bool
     let action: () -> Void
 
+    /// Six characters keeps three crumbs and the toolbar buttons inside the column.
+    private static let maxTitleLength = 6
+
     var body: some View {
         Button(action: action) {
-            Text(title.count > 8 ? String(title.prefix(7)) + "…" : title)
+            Text(title.count > Self.maxTitleLength ? String(title.prefix(Self.maxTitleLength - 1)) + "…" : title)
                 .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
                 .foregroundStyle(targeted ? IslandChrome.accent : (isCurrent ? Color.primary : Color.secondary))
                 .lineLimit(1)
-                .padding(.horizontal, 4)
-                .frame(height: 18)
+                .padding(.horizontal, 6)
+                .frame(height: 20)
                 .background {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(targeted ? IslandChrome.accent.opacity(0.14) : Color.clear)
+                    Capsule(style: .continuous)
+                        .fill(targeted ? IslandChrome.accent.opacity(0.16) : Color.clear)
                 }
-                .contentShape(Rectangle())
+                .contentShape(Capsule(style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.islandPress)
         .help(isCurrent ? title : "回到「\(title)」· 也可以把文件拖到这里")
     }
 }
@@ -660,24 +672,27 @@ struct TrayDropSlot: View {
     let onDropped: () -> Void
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: IslandChrome.innerRadius, style: .continuous)
-        HStack(spacing: 8) {
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
+        HStack(spacing: 10) {
             Image(systemName: "tray.and.arrow.down")
-                .font(.system(size: 12))
-            Text(targeted ? "松手放进暂存区" : "或者先放进暂存区")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(targeted ? "松手放进暂存区" : "或者先放进暂存区")
+                    .font(.system(size: 11, weight: .medium))
+                Text(tray.dropMode == .move ? "从原处移过来 · ⌥ 拷贝" : "拷贝一份 · ⌥ 移动")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .lineLimit(1)
             Spacer(minLength: 0)
-            Text(tray.dropMode == .move ? "从原处移过来 · ⌥ 拷贝" : "拷贝一份 · ⌥ 移动")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
         }
         .foregroundStyle(targeted ? IslandChrome.accent : Color.secondary)
-        .padding(.horizontal, 10)
-        .frame(height: 32)
+        .padding(.horizontal, 12)
+        .frame(height: 44)
         .background(shape.fill(targeted ? IslandChrome.accent.opacity(0.14) : IslandChrome.surface))
         .overlay {
             shape
-                .strokeBorder(targeted ? IslandChrome.accent : Color.clear, lineWidth: 1)
+                .strokeBorder(targeted ? IslandChrome.accent : IslandChrome.hairline, lineWidth: targeted ? 1 : 0.5)
                 .allowsHitTesting(false)
         }
         .contentShape(shape)
