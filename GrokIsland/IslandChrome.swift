@@ -47,6 +47,8 @@ enum IslandChrome {
     static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.86, blendDuration: 0.1)
     /// Hover and press feedback: quick, no bounce.
     static let hoverFade = Animation.easeOut(duration: 0.12)
+    /// A segmented control's thumb sliding to the new choice.
+    static let selectSpring = Animation.spring(response: 0.3, dampingFraction: 0.88)
 
     static let revealTransition: AnyTransition = .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
 }
@@ -108,14 +110,21 @@ extension View {
     }
 
     /// A Control Center–style module: a soft rounded fill one step lighter than the column.
-    func islandPlatter(inset: CGFloat = 10, raised: Bool = false) -> some View {
+    /// `tint` washes it in a state color, for a confirmation or a problem.
+    func islandPlatter(inset: CGFloat = 10, raised: Bool = false, tint: Color? = nil) -> some View {
         let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
         return padding(inset)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background { shape.fill(raised ? IslandChrome.surfaceRaised : IslandChrome.surface) }
+            .background {
+                if let tint {
+                    shape.fill(tint.opacity(0.12))
+                } else {
+                    shape.fill(raised ? IslandChrome.surfaceRaised : IslandChrome.surface)
+                }
+            }
             .overlay {
                 shape
-                    .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
+                    .strokeBorder(tint.map { $0.opacity(0.32) } ?? IslandChrome.hairline, lineWidth: tint == nil ? 0.5 : 1)
                     .allowsHitTesting(false)
             }
     }
@@ -129,6 +138,43 @@ extension View {
                     .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
                     .allowsHitTesting(false)
             }
+    }
+}
+
+/// A small label over one platter, the way grouped settings lists read. `accessory` sits at the
+/// label's trailing end, for a reset or refresh.
+struct IslandGroup<Content: View, Accessory: View>: View {
+    let title: String
+    let content: Content
+    let accessory: Accessory
+
+    init(_ title: String, @ViewBuilder content: () -> Content, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self.content = content()
+        self.accessory = accessory()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .islandSectionLabel()
+                Spacer(minLength: 0)
+                accessory
+            }
+            .frame(minHeight: 18)
+            .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .islandPlatter()
+        }
+    }
+}
+
+extension IslandGroup where Accessory == EmptyView {
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.init(title, content: content) { EmptyView() }
     }
 }
 

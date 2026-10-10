@@ -389,36 +389,30 @@ struct IslandShortcutSection: View {
     private static let customChoice = "custom"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("快捷按钮")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                if settings.shortcutButtons != .default {
-                    Button("重置") { settings.shortcutButtons = .default }
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
-                        .help("三个按钮回到整理错题、解答题目、检查代码。")
-                }
-            }
-
+        IslandGroup("快捷按钮") {
             ForEach(0..<IslandShortcutButtons.count, id: \.self) { index in
+                if index > 0 { IslandHairline() }
                 slotEditor(index)
             }
-
-            Text("点按钮仍会截当前最前面的页面交给 Grok。没改过就还是整理错题、解答题目、检查代码。")
-                .font(.caption2)
+            Text("点一下就截下最前面的页面，交给 Grok。")
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        } accessory: {
+            if settings.shortcutButtons != .default {
+                Button("恢复默认") { settings.shortcutButtons = .default }
+                    .buttonStyle(.islandPill(.quiet, compact: true))
+                    .help("三个按钮回到整理错题、解答题目、检查代码。")
+            }
         }
     }
 
     private func slotEditor(_ index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text("按钮 \(index + 1)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
                 Picker("", selection: choiceBinding(index)) {
                     ForEach(GrokQuickAction.buttons) { action in
                         Text(action.title).tag(action.rawValue)
@@ -428,21 +422,20 @@ struct IslandShortcutSection: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .controlSize(.small)
-                Spacer(minLength: 0)
+                .fixedSize()
             }
 
             if isCustom(index) {
-                TextField("按钮名称", text: stringBinding(index, \.customTitle))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-                TextField("交给 Grok 的提示词", text: stringBinding(index, \.customPrompt), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+                TextField("按钮上的字", text: stringBinding(index, \.customTitle))
+                    .islandField()
+                TextField("想让 Grok 做什么", text: stringBinding(index, \.customPrompt), axis: .vertical)
                     .lineLimit(2...4)
+                    .islandField()
                 HStack(spacing: 6) {
                     Text("图标")
-                        .font(.caption2)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
                     Picker("", selection: stringBinding(index, \.customSymbol)) {
                         ForEach(IslandShortcutSlot.symbolAllowlist, id: \.self) { symbol in
                             Image(systemName: symbol).tag(symbol)
@@ -451,7 +444,7 @@ struct IslandShortcutSection: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .controlSize(.small)
-                    Spacer(minLength: 0)
+                    .fixedSize()
                 }
             }
         }
@@ -514,7 +507,8 @@ struct IslandShortcutSection: View {
     }
 }
 
-/// Model provider, API key, PR repo, permissions, shortcut buttons, and the island background.
+/// Model provider, API key, PR repo, permissions, shortcut buttons, the island background, and
+/// the desktop shortcut, each as one grouped platter.
 struct SettingsPane: View {
     @ObservedObject var settings: IslandSettings
     @ObservedObject var monitor: CloudActivityMonitor
@@ -522,78 +516,93 @@ struct SettingsPane: View {
 
     @State private var keyDraft = ""
     @State private var screenAccess = PageCapture.hasScreenRecordingAccess
+    @State private var shortcutNote: String?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 if !settings.isModelReady {
-                    note(ModelProviderMessages.settingsHint)
+                    Text(ModelProviderMessages.settingsHint)
+                        .font(.system(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .islandPlatter(tint: IslandChrome.ember)
                 }
 
-                HStack {
-                    Text("模型服务")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    Picker("模型服务", selection: $settings.providerKind) {
-                        ForEach(ModelProviderKind.allCases) { kind in
-                            Text(kind.settingsTitle).tag(kind)
+                IslandGroup("模型") {
+                    HStack(spacing: 6) {
+                        Text("服务")
+                            .font(.system(size: 12))
+                        Spacer(minLength: 4)
+                        Picker("模型服务", selection: $settings.providerKind) {
+                            ForEach(ModelProviderKind.allCases) { kind in
+                                Text(kind.settingsTitle).tag(kind)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .fixedSize()
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .font(.caption)
+                    .onChange(of: settings.providerKind) { keyDraft = "" }
+
+                    IslandHairline()
+                    providerKeySection
+                    IslandHairline()
+                    providerModelSection
+
+                    if settings.providerKind == .cursor {
+                        note("问 Grok、快捷按钮和拆分任务都走 Cursor Cloud Agent。Key 只存在这台 Mac 的 Application Support/GrokIsland 里。")
+                    } else {
+                        note("问 Grok、三个快捷按钮和拆分任务都用这个服务。截图会一起发过去；模型看不了图片时会直接告诉你，不会偷偷丢掉。")
+                        note("想看 Cloud Agent，可以在上面选 Cursor（高级）。没有 Cursor 账号就不用管它。")
+                    }
                 }
-                .onChange(of: settings.providerKind) { keyDraft = "" }
 
-                providerKeySection
-                providerModelSection
-
-                if settings.providerKind == .cursor {
-                    note("问 Grok、快捷按钮和拆分任务走 Cursor Cloud Agent。Key 只存在本机 Application Support/GrokIsland。")
-                } else {
-                    note("问 Grok、三个快捷按钮和拆分任务都走这里。截图会一并送出；模型若不支持图片，会明确失败，不会悄悄丢掉。")
-                    note("Cursor（高级）仍可在上面的菜单里选，用来看 Cloud Agent。没有 Cursor 账号可以不用。")
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PR 仓库")
-                        .font(.caption.weight(.semibold))
+                IslandGroup("PR 仓库") {
                     TextField(IslandSettingsStorage.defaultPRRepo, text: $settings.prRepo)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
+                        .islandField()
                         .onSubmit { monitor.refreshSoon(minimumAge: 0) }
-                    note("通过本机已登录的 origin CLI 读取开着的 PR。")
+                    note("用这台 Mac 上已登录的 origin CLI 读取还开着的 PR。")
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text("屏幕录制权限")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
+                IslandGroup("权限") {
+                    HStack(spacing: 6) {
+                        Text("屏幕录制")
+                            .font(.system(size: 12))
+                        Spacer(minLength: 4)
                         Text(screenAccess ? "已开启" : "未开启")
-                            .font(.caption2)
+                            .font(.system(size: 11))
                             .foregroundStyle(screenAccess ? IslandChrome.positive : IslandChrome.ember)
                     }
                     if !screenAccess {
+                        note("快捷按钮要截当前页面。在系统设置里勾选 \(IslandChrome.name)，再重开 app。")
                         Button("打开系统设置") {
                             _ = CGRequestScreenCaptureAccess()
                             NSWorkspace.shared.open(PageCapture.screenRecordingSettingsURL)
                         }
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
-                        note("快捷按钮要截当前页面。勾选 \(IslandChrome.name) 后重开 app。")
+                        .buttonStyle(.islandPill(compact: true))
                     }
                 }
 
-                IslandHairline()
-                    .padding(.vertical, 2)
-
                 IslandShortcutSection(settings: settings)
 
-                IslandHairline()
-                    .padding(.vertical, 2)
-
                 IslandBackgroundSection(settings: settings)
+
+                IslandGroup("其他") {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("桌面快捷方式")
+                                .font(.system(size: 12))
+                            Text(shortcutNote ?? "在桌面放一个替身，双击就能打开 \(IslandChrome.name)。")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 4)
+                        Button("放到桌面", action: installDesktopShortcut)
+                            .buttonStyle(.islandPill(compact: true))
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -603,50 +612,50 @@ struct SettingsPane: View {
     private var providerKeySection: some View {
         let kind = settings.providerKind
         let saved = settings.hasSelectedAPIKey
-        let optional = kind == .ollama
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack {
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Text(kind.keySectionTitle)
-                    .font(.caption.weight(.semibold))
-                Spacer()
+                    .font(.system(size: 12))
+                Spacer(minLength: 4)
                 Text(keyStatusText)
-                    .font(.caption2)
+                    .font(.system(size: 11))
                     .foregroundStyle(keyStatusColor)
             }
-            HStack(spacing: 4) {
-                SecureField(saved ? "输入新 key 替换" : kind.keyPlaceholder, text: $keyDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+            HStack(spacing: 6) {
+                SecureField(saved ? "输入新的 key 来替换" : kind.keyPlaceholder, text: $keyDraft)
+                    .islandField()
                     .onSubmit(saveKey)
                 Button("保存", action: saveKey)
-                    .controlSize(.small)
+                    .buttonStyle(.islandPill(.prominent, compact: true))
                     .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            HStack {
-                if let url = kind.docsURL {
-                    Button(kind.docsLinkTitle) { NSWorkspace.shared.open(url) }
-                        .buttonStyle(.borderless)
-                }
-                if saved {
-                    Button("清除", role: .destructive) {
-                        do { try settings.clearProviderKey() } catch { engine.reportError(error) }
-                        monitor.refreshSoon(minimumAge: 0)
+            if kind.docsURL != nil || saved {
+                HStack(spacing: 4) {
+                    if let url = kind.docsURL {
+                        Button(kind.docsLinkTitle) { NSWorkspace.shared.open(url) }
+                            .buttonStyle(.islandPill(.quiet, compact: true))
                     }
-                    .buttonStyle(.borderless)
+                    Spacer(minLength: 0)
+                    if saved {
+                        Button("清除") {
+                            do { try settings.clearProviderKey() } catch { engine.reportError(error) }
+                            monitor.refreshSoon(minimumAge: 0)
+                        }
+                        .buttonStyle(.islandPill(.destructive, compact: true))
+                    }
                 }
             }
-            .font(.caption2)
-            if optional {
-                note("本地 Ollama 通常不需要 key。先在本机跑起来，再填写下面的模型名。")
+            if kind == .ollama {
+                note("本地 Ollama 一般不用 key。先在这台 Mac 上跑起来，再填下面的模型名。")
             }
         }
     }
 
     private var keyStatusText: String {
         if settings.providerKind == .ollama {
-            return settings.hasSelectedAPIKey ? "已保存" : "可不填"
+            return settings.hasSelectedAPIKey ? "已保存" : "可以不填"
         }
-        return settings.hasSelectedAPIKey ? "已保存" : "未设置"
+        return settings.hasSelectedAPIKey ? "已保存" : "还没填"
     }
 
     private var keyStatusColor: Color {
@@ -656,19 +665,17 @@ struct SettingsPane: View {
     }
 
     private var providerModelSection: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 6) {
             if settings.providerKind.allowsCustomBaseURL {
                 Text(settings.providerKind == .ollama ? "Ollama 地址" : "接口地址")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 12))
                 TextField(settings.providerKind.defaultBaseURL, text: $settings.endpointBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+                    .islandField()
             }
             Text(settings.providerKind == .cursor ? "Grok 模型 ID" : "模型")
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12))
             TextField(settings.providerKind.modelPlaceholder, text: modelBinding)
-                .textFieldStyle(.roundedBorder)
-                .font(.caption)
+                .islandField()
         }
     }
 
@@ -681,7 +688,7 @@ struct SettingsPane: View {
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.caption2)
+            .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -694,6 +701,16 @@ struct SettingsPane: View {
             keyDraft = ""
             monitor.refreshSoon(minimumAge: 0)
         } catch {
+            engine.reportError(error)
+        }
+    }
+
+    private func installDesktopShortcut() {
+        do {
+            _ = try DesktopShortcut.install()
+            shortcutNote = "已经放到桌面：\(DesktopShortcut.aliasName)"
+        } catch {
+            shortcutNote = error.localizedDescription
             engine.reportError(error)
         }
     }

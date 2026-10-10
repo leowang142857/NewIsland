@@ -9,35 +9,25 @@ struct IslandBackgroundSection: View {
     @ObservedObject var settings: IslandSettings
 
     @State private var note: String?
+    @Namespace private var kindThumb
 
     /// Above the island's `.statusBar` panel, so pickers never open underneath it.
     private static let pickerLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("岛背景")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                if settings.background != .default {
-                    Button("全部重置") {
-                        settings.resetBackground()
-                        note = nil
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption2)
-                    .help("回到默认背景，并清掉自定义的颜色和图片。只想切回原样、保留自定义，点上面的「默认」就行。")
-                }
-            }
-
-            Picker("", selection: $settings.background.kind) {
+        IslandGroup("岛背景") {
+            HStack(spacing: 0) {
                 ForEach(IslandBackgroundKind.allCases) { kind in
-                    Text(kind.title).tag(kind)
+                    IslandSegment(
+                        title: kind.title,
+                        selected: settings.background.kind == kind,
+                        namespace: kindThumb
+                    ) {
+                        withAnimation(IslandChrome.selectSpring) { settings.background.kind = kind }
+                    }
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
+            .islandSegmentTrack()
 
             switch settings.background.kind {
             case .standard:
@@ -56,9 +46,18 @@ struct IslandBackgroundSection: View {
 
             if let note {
                 Text(note)
-                    .font(.caption2)
+                    .font(.system(size: 10))
                     .foregroundStyle(IslandChrome.ember)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        } accessory: {
+            if settings.background != .default {
+                Button("全部重置") {
+                    settings.resetBackground()
+                    note = nil
+                }
+                .buttonStyle(.islandPill(.quiet, compact: true))
+                .help("回到默认背景，并清掉自定义的颜色和图片。只想切回原样、保留自定义，点上面的「默认」就行。")
             }
         }
         .onAppear { NSColorPanel.shared.level = Self.pickerLevel }
@@ -100,7 +99,7 @@ struct IslandBackgroundSection: View {
                         ),
                         selected: stops == preset.colors,
                         help: preset.title,
-                        width: 30
+                        width: 28
                     ) {
                         settings.background.gradient = preset.colors
                     }
@@ -109,7 +108,7 @@ struct IslandBackgroundSection: View {
             }
             HStack(spacing: 4) {
                 Text("色标")
-                    .font(.caption2)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 ForEach(stops.indices, id: \.self) { index in
                     ColorPicker("", selection: stopBinding(index), supportsOpacity: false)
@@ -121,7 +120,7 @@ struct IslandBackgroundSection: View {
                 } label: {
                     Image(systemName: "minus")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(IslandIconButtonStyle(size: 22))
                 .disabled(stops.count <= IslandBackgroundStyle.gradientStopRange.lowerBound)
                 .help("去掉最后一个色标")
                 Button {
@@ -129,7 +128,7 @@ struct IslandBackgroundSection: View {
                 } label: {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(IslandIconButtonStyle(size: 22))
                 .disabled(stops.count >= IslandBackgroundStyle.gradientStopRange.upperBound)
                 .help("加一个色标")
             }
@@ -145,13 +144,13 @@ struct IslandBackgroundSection: View {
             HStack(spacing: 8) {
                 thumbnail
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(hasImage ? "正在用自定义图片" : "还没选图片")
-                        .font(.caption2.weight(.medium))
-                    caption(hasImage ? "已复制到 Application Support/GrokIsland/backgrounds" : "选好之前先用默认背景。")
+                    Text(hasImage ? "正在用自己的图片" : "还没选图片")
+                        .font(.system(size: 11, weight: .medium))
+                    caption(hasImage ? "拷了一份到 Application Support/GrokIsland/backgrounds" : "选好之前先用默认背景。")
                 }
                 Spacer(minLength: 0)
-                Button(hasImage ? "换一张…" : "选择图片…", action: pickImage)
-                    .controlSize(.small)
+                Button(hasImage ? "换一张" : "选图片", action: pickImage)
+                    .buttonStyle(.islandPill(compact: true))
             }
             sliderRow("模糊", value: $settings.background.imageBlur, in: IslandBackgroundStyle.blurRange) {
                 "\(Int($0.rounded()))"
@@ -161,7 +160,7 @@ struct IslandBackgroundSection: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
         if let image = IslandBackgroundImageCache.image(at: settings.backgroundImageURL) {
             Image(nsImage: image)
                 .resizable()
@@ -176,7 +175,7 @@ struct IslandBackgroundSection: View {
                 .frame(width: 44, height: 30)
                 .overlay {
                     Image(systemName: "photo")
-                        .font(.caption2)
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
         }
@@ -186,7 +185,7 @@ struct IslandBackgroundSection: View {
 
     private var sharedSliders: some View {
         let style = settings.background
-        return VStack(alignment: .leading, spacing: 3) {
+        return VStack(alignment: .leading, spacing: 4) {
             sliderRow("暗化", value: $settings.background.dim, in: IslandBackgroundStyle.dimRange, display: percent)
             if style.minimumDim > style.dim + 0.005 {
                 caption("这个背景偏亮，已自动暗化到 \(percent(style.effectiveDim))，免得文字看不清。")
@@ -206,11 +205,11 @@ struct IslandBackgroundSection: View {
         width: CGFloat = 22,
         action: @escaping () -> Void
     ) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
         return Button(action: action) {
             shape
                 .fill(fill)
-                .frame(width: width, height: 16)
+                .frame(width: width, height: 18)
                 .overlay {
                     shape.strokeBorder(
                         selected ? Color.white.opacity(0.9) : Color.white.opacity(0.15),
@@ -231,20 +230,20 @@ struct IslandBackgroundSection: View {
     ) -> some View {
         HStack(spacing: 6) {
             Text(title)
-                .font(.caption2)
-                .frame(width: 50, alignment: .leading)
+                .font(.system(size: 11))
+                .frame(width: 48, alignment: .leading)
             Slider(value: value, in: range)
                 .controlSize(.mini)
             Text(display(value.wrappedValue))
-                .font(.caption2.monospacedDigit())
+                .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .trailing)
+                .frame(width: 32, alignment: .trailing)
         }
     }
 
     private func caption(_ text: String) -> some View {
         Text(text)
-            .font(.caption2)
+            .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
