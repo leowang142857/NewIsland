@@ -10,6 +10,8 @@ struct GrokQuickBar: View {
     @State private var question = ""
     @State private var splitDraft = ""
     @State private var capturing = false
+    /// Which shortcut tile is taking the screenshot; nil while the question field is.
+    @State private var capturingShortcut: Int?
     @State private var splitting = false
     @State private var splitTargeted = false
     @State private var note: String?
@@ -19,54 +21,66 @@ struct GrokQuickBar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 ForEach(shortcuts.indices, id: \.self) { index in
-                    ShortcutButton(shortcut: shortcuts[index], disabled: capturing) {
-                        fire(shortcuts[index])
+                    ShortcutButton(
+                        shortcut: shortcuts[index],
+                        busy: capturing && capturingShortcut == index,
+                        disabled: capturing
+                    ) {
+                        fire(shortcuts[index], at: index)
                     }
                 }
             }
 
-            inputRow(
-                "问 Grok，会附上当前页面截图",
-                text: $question,
-                busy: capturing,
-                symbol: "arrow.up",
-                help: "发送",
-                submit: fireAsk
-            )
+            VStack(alignment: .leading, spacing: 6) {
+                inputRow(
+                    "问问 Grok · 会带上当前页面",
+                    text: $question,
+                    busy: capturing && capturingShortcut == nil,
+                    symbol: "arrow.up",
+                    help: "发送",
+                    submit: fireAsk
+                )
 
-            inputRow(
-                "拆分一个大任务，也可以把文件拖进来",
-                text: $splitDraft,
-                busy: splitting,
-                symbol: "arrow.triangle.branch",
-                help: "拆成 2–4 个子任务并行执行，完成后汇总成一条结果",
-                highlighted: splitTargeted,
-                submit: { fireSplit() }
-            )
-            .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
-                fireSplitDrop(providers)
-                return true
+                inputRow(
+                    "大任务拆开做 · 也能拖文件进来",
+                    text: $splitDraft,
+                    busy: splitting,
+                    symbol: "arrow.triangle.branch",
+                    help: "拆成 2–4 个子任务一起做，做完汇总成一条",
+                    highlighted: splitTargeted,
+                    submit: { fireSplit() }
+                )
+                .onDrop(of: ShellView.dropTypes, isTargeted: $splitTargeted) { providers in
+                    fireSplitDrop(providers)
+                    return true
+                }
             }
 
             if splitTargeted {
-                Text("松手后拆成 2–4 个子任务，各自跑完再汇总")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                caption("松手就拆成 2–4 个子任务，各自做完再汇总", color: .secondary)
             }
 
             if let note {
-                Text(note)
-                    .font(.system(size: 10))
-                    .foregroundStyle(IslandChrome.ember)
-                    .lineLimit(3)
+                caption(note, color: IslandChrome.ember)
             }
         }
     }
 
-    /// Text field with its action tucked inside the trailing edge.
+    /// Lines up with the text inside the capsule fields.
+    private func caption(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(color)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+    }
+
+    /// Spotlight-like capsule with its action tucked inside the trailing end. The 22 pt button
+    /// sits 4 pt in from the 30 pt capsule, so the two curves stay concentric.
     private func inputRow(
         _ placeholder: String,
         text: Binding<String>,
@@ -79,37 +93,42 @@ struct GrokQuickBar: View {
         let empty = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return TextField(placeholder, text: text)
             .onSubmit(submit)
-            .padding(.trailing, 22)
-            .islandField(highlighted: highlighted)
+            .padding(.trailing, 20)
+            .islandCapsuleField(highlighted: highlighted)
             .overlay(alignment: .trailing) {
                 Group {
                     if busy {
-                        ProgressView().controlSize(.mini)
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 22, height: 22)
                     } else {
                         Button(action: submit) {
                             Image(systemName: symbol)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(empty ? Color.white.opacity(0.3) : IslandChrome.ink)
-                                .frame(width: 18, height: 18)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(empty ? Color.white.opacity(0.32) : IslandChrome.ink)
+                                .frame(width: 22, height: 22)
                                 .background(Circle().fill(empty ? Color.clear : Color.white.opacity(0.9)))
                                 .contentShape(Circle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.islandPress)
                         .disabled(empty)
                         .help(help)
                     }
                 }
                 .padding(.trailing, 4)
+                .animation(IslandChrome.hoverFade, value: empty)
             }
     }
 
-    private func fire(_ shortcut: ResolvedIslandShortcut) {
+    private func fire(_ shortcut: ResolvedIslandShortcut, at index: Int) {
         guard !capturing, shortcut.isReady else { return }
         capturing = true
+        capturingShortcut = index
         note = nil
         Task { @MainActor in
             let page = await PageCapture.snapshot()
             capturing = false
+            capturingShortcut = nil
             note = page.captureNote
             do {
                 let record = try engine.runShortcut(title: shortcut.title, prompt: shortcut.prompt, page: page)
@@ -123,6 +142,7 @@ struct GrokQuickBar: View {
     private func fireAsk() {
         guard !capturing else { return }
         capturing = true
+        capturingShortcut = nil
         note = nil
         let asked = question
         Task { @MainActor in
@@ -165,35 +185,56 @@ struct GrokQuickBar: View {
     }
 }
 
+/// A Control Center–style tile: the glyph over a short label. The tapped tile shows the
+/// spinner while the page is captured.
 private struct ShortcutButton: View {
     let shortcut: ResolvedIslandShortcut
+    var busy = false
     let disabled: Bool
     let action: () -> Void
 
     @State private var hovering = false
 
+    private var lit: Bool { hovering && !disabled && shortcut.isReady }
+
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: IslandChrome.platterRadius, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: shortcut.symbolName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 5) {
+                Group {
+                    if busy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: shortcut.symbolName)
+                            .font(.system(size: 15))
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                }
+                .frame(height: 18)
                 Text(shortcut.title)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(hovering ? IslandChrome.surfaceRaised : IslandChrome.surface)
-            )
-            .contentShape(Rectangle())
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .background(shape.fill(lit ? IslandChrome.surfaceRaised : IslandChrome.surface))
+            .overlay {
+                shape
+                    .strokeBorder(IslandChrome.hairline, lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.islandPress)
         .onHover { hovering = $0 }
+        .animation(IslandChrome.hoverFade, value: hovering)
         .disabled(disabled || !shortcut.isReady)
         .opacity(shortcut.isReady ? 1 : 0.45)
-        .help("截当前最前面的页面，交给 Grok \(shortcut.title)")
+        .help(shortcut.isReady
+            ? "把最前面的页面截下来，交给 Grok：\(shortcut.title)"
+            : "这个按钮还没写要做什么 · 到设置里补上")
     }
 }
 
@@ -205,88 +246,29 @@ struct RunDetailView: View {
 
     @State private var copied = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                TaskLightDot(state: TaskLightBoard.state(for: run.phase), size: 6)
-                Text(phaseTitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(run.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                Spacer()
-                if run.isActive {
-                    Button("取消") { engine.cancelRun(id: run.id) }
-                        .buttonStyle(.borderless)
-                        .font(.caption2)
-                }
-                if let answer = run.resultSummary, !run.isActive {
-                    Button(copied ? "已拷贝" : "拷贝") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(answer, forType: .string)
-                        copied = true
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption2)
-                }
-                if let link = run.link, let url = URL(string: link) {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Image(systemName: "arrow.up.right.square")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("在 Cursor 打开这个 Cloud Agent，可继续追问")
-                }
-                Button {
-                    engine.deleteRuns(ids: [run.id])
-                    onDeleted()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help(run.isActive ? "取消并删除这条记录" : "删除这条记录")
-            }
+    private var state: TaskLightState { TaskLightBoard.state(for: run.phase) }
 
-            if let question = run.question {
-                Text(question)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 9)
-                    .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 1, style: .continuous)
-                            .fill(Color.white.opacity(0.22))
-                            .frame(width: 2)
-                    }
-                    .padding(.vertical, 2)
-            }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            header
 
             if run.isActive {
-                ProgressView(value: run.progress)
-                Text(run.message)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    ProgressView(value: run.progress)
+                        .controlSize(.small)
+                    Text(run.message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             ScrollView {
-                Group {
-                    if let answer = run.resultSummary, !run.isActive {
-                        MarkdownLite(text: answer)
-                    } else if run.isActive {
-                        Text(run.origin == .splitTask
-                            ? "正在把任务拆开并行执行。每个子任务有自己的任务灯，全部结束后汇总显示在这里。"
-                            : "答完后结果会显示在这里。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(run.phase == .cancelled ? "已取消，没有结果。" : run.message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    if let question = run.question {
+                        quote(question)
                     }
+                    answer
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
@@ -294,15 +276,103 @@ struct RunDetailView: View {
         }
     }
 
-    private var phaseTitle: String {
-        switch run.phase {
-        case .queued: "排队中"
-        case .awaitingConfirmation: "等待确认"
-        case .running: "运行中"
-        case .succeeded: "已完成"
-        case .failed: "失败"
-        case .cancelled: "已取消"
+    private var header: some View {
+        HStack(spacing: 6) {
+            TaskLightDot(state: state, size: 6)
+            Text(state.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(Self.stamp(run.createdAt))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            HStack(spacing: 2) {
+                if run.isActive {
+                    Button("取消") { engine.cancelRun(id: run.id) }
+                        .buttonStyle(.islandPill(compact: true))
+                        .padding(.trailing, 4)
+                }
+                if let answer = run.resultSummary, !run.isActive {
+                    Button {
+                        copy(answer)
+                    } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(.islandIcon(tint: copied ? IslandChrome.positive : nil))
+                    .help(copied ? "拷好了" : "拷贝回答")
+                }
+                if let link = run.link, let url = URL(string: link) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.islandIcon())
+                    .help("在 Cursor 里打开这个 Cloud Agent，可以接着问")
+                }
+                Button {
+                    engine.deleteRuns(ids: [run.id])
+                    onDeleted()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.islandIcon())
+                .help(run.isActive ? "取消并删掉这条记录" : "删掉这条记录")
+            }
         }
+        .frame(minHeight: IslandChrome.iconTarget)
+    }
+
+    /// What was asked, set off by a thin bar the way Mail quotes a reply.
+    private func quote(_ question: String) -> some View {
+        Text(question)
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 10)
+            .overlay(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 2)
+            }
+    }
+
+    @ViewBuilder
+    private var answer: some View {
+        if let answer = run.resultSummary, !run.isActive {
+            MarkdownLite(text: answer)
+        } else if run.isActive {
+            Text(run.origin == .splitTask
+                ? "正在拆开同时做。每个子任务都有自己的灯，全做完会汇总到这里。"
+                : "答好了就显示在这里。")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        } else {
+            Text(run.phase == .cancelled ? "取消了，这次没有结果。" : run.message)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func copy(_ answer: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(answer, forType: .string)
+        copied = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            copied = false
+        }
+    }
+
+    /// Just the time for today, with the date before that, so the header stays on one line.
+    private static func stamp(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 }
 
@@ -317,24 +387,24 @@ struct MarkdownLite: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let line):
                     inline(line)
-                        .font(.system(size: 12, weight: .semibold))
-                        .padding(.top, 4)
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.top, 5)
                 case .paragraph(let line):
                     inline(line)
                         .font(.system(size: 12))
-                        .lineSpacing(2)
+                        .lineSpacing(3)
                 case .code(let code):
                     Text(code)
                         .font(.system(size: 10.5, design: .monospaced))
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(IslandChrome.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: IslandChrome.fieldRadius, style: .continuous))
                 }
             }
         }

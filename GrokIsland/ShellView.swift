@@ -338,7 +338,7 @@ struct ShellView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .font(.system(size: 11))
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 12)
                 .frame(height: 20)
                 .contentShape(Rectangle())
             }
